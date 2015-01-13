@@ -1,0 +1,137 @@
+{% from "_helpers.html" import render_field %}
+
+{% macro copr_form(form, view, copr = None, username = None) %}
+  {# if using for updating, we need to pass name to url_for, but otherwise we need to pass nothing #}
+  <form action="{% if copr %}
+        {{ url_for(view, username = copr.owner.name, coprname = copr.name) }}
+    {% elif username %}
+        {{ url_for(view, username = username) }}
+    {% else %}
+        {{ url_for(view) }}
+    {% endif %}" method=post class=add-entry>
+    <dl>
+      {{ form.csrf_token }}
+      {{ render_field(form.id, hidden = True) }}
+      {% if copr is none %}
+        {{ render_field(form.name, label='Project Name', required = True, class="required") }}
+      {% else %}
+        {{ render_field(form.name, hidden = True) }}
+        {{ render_field(form.name, label='Project Name', disabled = True) }}
+      {% endif %}
+      {{ render_field(form.description, rows=5, cols=50, placeholder='Optional - describe your project briefly.') }}
+      {{ render_field(form.instructions, rows=5, cols=50, placeholder='Optional - describe how your project can be installed. Where users can report bugs and issues. Link to wiki is good as well.') }}
+
+      <dd>You can use <a href="http://daringfireball.net/projects/markdown/syntax">markdown syntax</a>, inline HTML is forbidden..</dd>
+      <dt class="field-label required">Chroots</dt>
+
+
+      {% if form._mock_chroots_error %}
+        <p class="form-error">{{ form._mock_chroots_error }}</p>
+      {% endif %}
+      {% for group_set, chs in form.chroots_sets.items() %}
+        <table class="chroots-set">
+          {% for ch in chs %}
+            <tr>
+              <td>
+                {{ form|attr(ch)|attr('label') }}
+                {% if form|attr(ch)|attr('label') %}
+                  {% else %}
+                  {{ form|attr(ch)|attr('label') }}
+                {% endif %}
+              </td>
+              <td>
+                {{ form|attr(ch) }}
+              </td>
+              {% if copr and form|attr(ch)|attr('data') %}
+                <td>
+                  <a href="{{ url_for('coprs_ns.chroot_edit', username = copr.owner.name, coprname = copr.name, chrootname = form|attr(ch)|attr('label')|attr('text'))}}">
+                    [Edit]
+                  </a>
+
+                </td>
+              {% endif %}
+            </tr>
+          {% endfor %}
+        </table>
+      {% endfor %}
+      {{ render_field(form.repos, rows=5, cols=50, placeholder='Optional - URL to additional yum repos, which can be used during build. Space separated. This should be baseurl from .repo file. E.g.: http://copr-be.cloud.fedoraproject.org/results/rhughes/f20-gnome-3-12/fedora-$releasever-$basearch/') }}
+      {% if copr is none %}{# we're creating the copr, so display initial builds area #}
+        {{ render_field(form.initial_pkgs, rows=5, cols=50, placeholder='Optional - list of src.rpm to build initially. Can be skipped and submitted later.') }}
+      {% endif %}
+
+      <dt><b>Package repositories</b></dt>
+      <dd class="field-label-help">
+        Repository meta data is refreshed after each build. <br />
+        You can disable it with the option below. <br />
+        You will be still able to regenerate your repositories manually on the overview page.
+      </dd>
+      <dd>
+        <!-- Create repository metadata automatically: -->
+        Disable automatic repository meta data generation
+        {{ form.disable_createrepo }}
+      </dd>
+
+      <dt><input type="submit" value="{% if copr %}Update{% else %}Create{% endif %}"></dt>
+    </dl>
+  </form>
+{% endmacro %}
+
+{% macro copr_delete_form(form, copr) %}
+  <form action="{{ url_for('coprs_ns.copr_delete', username=copr.owner.name, coprname=copr.name) }}" method="post">
+    <dl>
+      {{ form.csrf_token }}
+      <dd>
+        {% if form.verify.errors %}
+          {% for error in form.verify.errors %}
+            <p class="form-error">{{ error }}</p>
+          {% endfor %}
+        {% endif %}
+      </dd>
+      {{ form.verify }}
+      <dt><input type="submit" value="Delete"></dt>
+    </dl>
+  </form>
+{% endmacro %}
+
+{% macro copr_permissions_form(form, copr, permissions) %}
+  {% if permissions %}
+    <form action="{{ url_for('coprs_ns.copr_update_permissions', username=copr.owner.name, coprname=copr.name) }}" method=post>
+      {{ form.csrf_token }}
+      <table class="permissions-table">
+        <tr><th>Username</th><th>Is Builder</th><th>Is Admin</th></tr>
+        {% for perm in permissions %}
+          <tr>
+            <td>{{ perm.user.name }}</td>
+            <td>
+              {{ perm.copr_builder|perm_type_from_num }}
+              {% if perm.copr_builder != 0 %}
+                {{ form['copr_builder_{0}'.format(perm.user.id)] }}
+              {% endif %}
+            </td>
+            <td>
+              {{ perm.copr_admin|perm_type_from_num }}
+              {% if perm.copr_admin != 0 %}
+                {{ form['copr_admin_{0}'.format(perm.user.id)] }}
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </table>
+      <dd><input type="submit" value="Save"></dd>
+    </form>
+  {% endif %}
+  {% endmacro %}
+
+{% macro copr_legal_flag_form(form, copr) %}
+<form class="legal-flag" method="post" action={{ url_for('coprs_ns.copr_legal_flag', username=copr.owner.name, coprname=copr.name) }}>
+  If you think that this project may be violating our policies, you can mark it for legal review.
+  You can add an optional comment describing what you think is wrong here.
+
+  <dl>
+    {{ render_field(form.comment, rows=5, cols=50) }}
+    <dt>
+      <input type="submit" value="Raise Legal Flag">
+    </dt>
+  </dl>
+  </form>
+{% endmacro %}

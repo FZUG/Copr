@@ -1,0 +1,40 @@
+{% from "coprs/detail/_builds_forms.html" import copr_build_cancel_form, copr_build_repeat_form, copr_build_delete_form %}
+
+{% macro builds_table(builds, page) %}
+  {% if builds %}
+    <table class="status-table">
+      <tr>
+        <th>Id</th>
+        <th>Package</th>
+        <th>Version</th>
+        <th>Submitted</th>
+        <th>Build time</th>
+        <th>Status</th>
+      </tr>
+    {% for build in builds %}
+      <tr class="build-row build-row-{{ build.state }}" >
+        <td><a href="{{url_for("coprs_ns.copr_build", username = build.copr.owner.name, coprname = build.copr.name, build_id = build.id)}}">{{ build.id }}</a></td>
+        <td>{{ build.pkgs|pkg_name }}</td> 
+        <td>
+            {% if build.pkg_version %} 
+                {{ build.pkg_version}}
+            {% else %}
+                 - 
+            {% endif %}
+        </td> 
+        <td>
+            {% if g.user %}
+                {{ build.submitted_on|localized_time(g.user.timezone) }}
+            {% else %}
+                {{ build.submitted_on|localized_time("UTC") }}
+            {% endif %}
+        </td>
+        <td> {{ build.started_on|time_ago(build.ended_on) }} </td>
+        <td class="build-{{build.state}}" alt="{{build.state|build_state_description}}">{{ build.state }}</td>
+      </tr>
+    {% endfor %}
+    </table>
+  {% else %}
+    <h3>No builds so far</h3>
+  {% endif %}
+{% endmacro %}

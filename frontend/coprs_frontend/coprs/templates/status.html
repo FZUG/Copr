@@ -1,0 +1,17 @@
+{% extends "layout.html" %}
+{% block title %} Task queue - Copr {% endblock %}
+{% block header %} Task queue - Copr {% endblock %}
+{% block body %}
+<h1> Task queue </h1>
+<div class="horizontal-menu">
+  <ul>
+    <li class="{% block waiting_selected %}unselected{% endblock %}">
+      <a href="{{ url_for('status_ns.waiting') }}">Waiting</a>
+    </li>
+    <li class="{% block running_selected %}unselected{% endblock %}">
+      <a href="{{ url_for('status_ns.running') }}">Running</a>
+    </li>
+  </ul>
+</div>
+{% block status_body %}{% endblock %}
+{% endblock %}

@@ -1,0 +1,154 @@
+WORK IN PROGRESS
+
+- How coprs works
+  - SEE README FOR OVERVIEW
+
+
+- need at least 1 server
+- some instances/systems for builders (Fedora Copr use OpenStack)
+
+Backend:
+ansible playbook: 
+  http://infrastructure.fedoraproject.org/infra/ansible/playbooks/hosts/copr-be.cloud.fedoraproject.org.yml
+
+- enable epel (if you use RHEL)
+- enable optional channel (if you use RHEL)
+- install copr-backend package
+- make sure that Redis is up and running
+- edit /etc/copr/copr-be.conf
+  - change results_baseurl and frontend_url to your hostname
+  - frontend_auth must have same value as BACKEND_PASSWORD from have frontend in /etc/copr/copr.conf
+  - define your build groups: (more info in the config comments)
+    - spawn_playbook - path to ansible playbook which spawns builder
+    - terminate_playbook - path to ansible playbook which terminate builder
+      - you can see /usr/share/doc/copr*/playbooks/ for examples
+      - for Fedora copr playbook see FEDORA PLAYBOOK below
+  - other variables can be edited as well, but it is optional
+- ntp should be enabled and started
+- ports 22, 80, 443 should be open
+- cp /usr/share/doc/copr-*/lighttpd/* /etc/lighttpd/conf.d/
+- edit file /etc/lighttpd/lighttpd.conf as follows:
+       -server.document-root = server_root + "/lighttpd"
+       +server.document-root = "/var/lib/copr/public_html"
+   this is recomended to be separate mount point
+
+FEDORA PLAYBOOK:
+1. spawn instance playbook - 
+   http://infrastructure.fedoraproject.org/infra/ansible/roles/copr/backend/templates/provision/builderpb.yml
+   - just an ansible playbook which sets up and provisions an instance
+     in our case it is using eucalyptus but it doesn't have to be
+     any cloud provider - it just needs to be able to get an ip an
+     ssh into it - cloud providers or private clouds just make more 
+     sense
+2. provisioning dir [TODO - this playbook is old and need to be updated]
+   http://infrastructure.fedoraproject.org/infra/ansible/roles/copr/backend/files/
+   - what gets pushed to the other side - ssh keys, users, mock
+     configs, etc
+3. terminate instance playbook -
+   http://infrastructure.fedoraproject.org/infra/ansible/roles/copr/backend/templates/provision/terminatepb.yml
+4. create ~copr/.ssh/id_rsa with ssh key to VM guests
+
+
+Frontend:
+- if you run on EPEL - add epel repo
+- add yum repository http://copr-be.cloud.fedoraproject.org/results/msuchy/copr/
+- yum install copr-frontend copr-selinux
+
+- apache setup
+  cp /usr/share/doc/copr-frontend/coprs.conf.example /etc/httpd/conf.d/coprs.conf
+  and edit it to your needs - at least ServerName, port and WSGIScriptAlias
+
+- if you run on EPEL add virtenv of flask and friends
+  - virtualenv --distribute virtenv  
+  - source virtenv/bin/activate
+  - pip install flask flask-sqlalchemy flask-openid flask-wtf alembic
+  - pip install -I  SQLAlchemy MarkupSafe 
+  - pip install pytest
+
+- edit credentials /etc/copr/copr.conf (or /etc/copr/copr_devel.conf for development mode)
+- cd /usr/share/copr/coprs_frontend
+- configure DB first - see DB section below
+# for develop setup do:
+COPR_CONFIG=/etc/copr/copr_devel.conf ./manage.py create_db --alembic alembic.ini
+# for production setup do:
+./manage.py create_db  --alembic alembic.ini
+
+- for developing you can run:
+  ./manage.py runserver -t <FQDN>
+  and this will load DevelopmentConfig from coprs_frontend/coprs/config.py
+
+- for production is used ProductionConfig from coprs_frontend/coprs/config.py
+
+- Add chroots. E.g:
+ su - copr-fe -c './manage.py create_chroot fedora-18-x86_64 fedora-18-i386'
+
+
+DB config
+=========
+
+Copr can use either SQLite or PostgreSQL. Choose one.
+
+SQLite
+~~~~~~
+
+- yum install sqlite
+- in file /etc/copr/copr.conf put:
+  SQLALCHEMY_DATABASE_URI = 'sqlite:////var/lib/copr/data/copr.db'
+This will use sqlite db file in /var/lib/copr/data/copr.db (manage.py will create that file)
+- Note that you have to either create db as copr-fe user or you have to run:
+  chown copr-fe:copr-fe /var/lib/copr/data/copr.db
+  after you run "./manage.py create_db"
+
+PostgreSQL
+~~~~~~~~~~
+
+- yum install -y postgresql-server
+- chkconfig postgresql on
+- on Fedoras, run:
+ postgresql-setup initdb
+- everywhere else run:
+ service postgresql initdb
+
+- service postgresql start
+- su - postgres -c 'PGPASSWORD=coprpass ; createdb -E UTF8 coprdb ; yes $PGPASSWORD | createuser -P -sDR copr-fe'
+
+Configure the user to use md5 password to connect to that database. Put the lines like following to /var/lib/pgsql/data/pg_hba.conf. Avoid the common pitfall: Make sure you put them *before* those existing lines that are for all..
+
+local coprdb copr-fe md5
+host  coprdb copr-fe 127.0.0.1/8 md5
+host  coprdb copr-fe ::1/128 md5
+local coprdb postgres  ident
+
+Then reload PostgreSQL:
+ service postgresql reload
+
+and test the connection:
+
+PGPASSWORD=coprpass psql -a -U copr-fe coprdb
+PGPASSWORD=coprpass psql -a -h localhost -U copr-fe coprdb
+
+Upgrade
+=======
+After upgrade of copr-frontend you should upgrade db schema:
+cd /usr/share/copr/coprs_frontend
+alembic upgrade head
+
+Make yourself admin
+===================
+
+Run:
+  cd /usr/share/copr/coprs_frontend/
+  ./manage.py alter_user --admin msuchy
+
+Then navigate to:
+  http://your.copr.fqdn/admin
+
+
+DEBUGING
+========
+
+Run mockremote as standalone process:
+su - copr
+cd /usr/share/copr
+python backend/mockremote.py -b 172.16.3.4 -r fedora-19-x86_64 <url of src.rpm>
+

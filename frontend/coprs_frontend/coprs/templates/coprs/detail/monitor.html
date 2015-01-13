@@ -1,0 +1,59 @@
+{% extends "coprs/detail.html" %}
+{% from "coprs/detail/_build_states.html" import build_states %}
+{% block title %}Monitor {{ copr.owner.name }}/{{ copr.name }}{% endblock %}
+{% block monitor_selected %}selected{% endblock %}
+
+{% block detail_body %}
+  {% if build %}
+    <p>
+      Latest build status:
+      <strong>{{ build.state }}</strong>
+    </p>
+      <table class="status-table">
+        <tr></tr>
+        <tr>
+          <th rowspan="2">Package</th>
+          <th rowspan="2">Version</th>
+          {% for i, chroot in oses %}
+          <th colspan="{{i}}">
+            {{ chroot|capitalize }}
+          </th>
+          {% endfor %}
+        </tr>
+        <tr>
+          {% for chroot in archs %}
+          <th>
+            {{ chroot }}
+          </th>
+          {% endfor %}
+        </tr>
+        {% for package, version, states in packages %}
+          <tr>
+            <td>{{ package }}</td>
+            <td>
+                {% if version: %}
+                    {{ version }}
+                {% else %}
+                    - 
+                {% endif %}
+            </td>
+            {% for build_id, state in states %}
+              <td class="centered build-{{ state }}">
+                {% if state %}
+                  {{ state }}
+                {% else %}
+                  <a href="{{ url_for('coprs_ns.copr_repeat_build',
+                    username=copr.owner.name,
+                    coprname=copr.name,
+                    build_id=build_id) }}">resubmit</a>
+                {% endif %}
+              </td>
+            {% endfor %}
+          </tr>
+        {% endfor %}
+      </table>
+  {% else %}
+    <h2>No builds so far.</h2>
+  {% endif %}
+  {{ build_states() }}
+{% endblock %}

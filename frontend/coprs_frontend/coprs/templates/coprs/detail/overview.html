@@ -1,0 +1,123 @@
+{% extends "coprs/detail.html" %}
+
+{% from "coprs/_coprs_forms.html" import copr_legal_flag_form with context %}
+
+{% block overview_selected %}selected{% endblock %}
+
+{% block detail_body %}
+  <h2>Description</h2>
+  <div class="shift-right">{{ copr.description|markdown|default('Description not filled in by author. Very likely personal repository for testing purpose, which you should not use.', true) }}</div>
+  <h2>Installation Instructions</h2>
+  <div class="shift-right">{{ copr.instructions|markdown|default('Instructions not filled in by author. Author knows what to do. Everybody else should avoid this repo.', true) }}</div>
+  <h2>Active Releases</h2>
+  <div class="disclaimer">
+    <p>
+      The following unofficial repositories are provided as-is by owner of this project.
+      Contact the owner directly for bugs or issues (IE: not bugzilla).
+    </p>
+  </div>
+  <div class="dnf-enable-field"> # <input onClick="this.select();"type="text" value="dnf copr enable {{copr.owner.name}}/{{    copr.name}}" readonly="readonly">
+    More info about <a target="_blank" href="https://fedorahosted.org/copr/wiki/HowToEnableRepo">how to enable a repo on the wiki page.</a></div>
+  <table class="releases">
+    <tr>
+      <th class="leftmost">Release</th>
+      <th>Architecture</th>
+      <th class="rightmost">Yum Repo</th>
+    </tr>
+    {% for mock_chroot in copr.active_chroots %}
+      {% if loop.index < copr.active_chroots|length %}
+        {% if mock_chroot.os_release != copr.active_chroots[loop.index].os_release or
+              mock_chroot.os_version != copr.active_chroots[loop.index].os_version %}
+          {# next release is different => release-end #}
+          <tr class="release-end">
+        {% else %}
+          <tr>
+        {% endif %}
+      {% else %}{# last line => release-end for sure #}
+        <tr class="release-end">
+      {% endif %}
+        {% if mock_chroot.os_release != copr.active_chroots[loop.index0 - 1].os_release or
+	      mock_chroot.os_version != copr.active_chroots[loop.index0 - 1].os_version or
+	      loop.index0 == 0 %}
+          {# previous os_release-os_version were different or this is the first one #}
+          <td>{{ mock_chroot.os_release|capitalize }} {{ mock_chroot.os_version }}</td>
+        {% else %}
+          <td></td>
+        {% endif %}
+      <td>
+        {{ mock_chroot.arch }}
+        {% if copr.buildroot_pkgs(mock_chroot): %}
+            <a id="modified-chroot-{{mock_chroot.name}}">[modified]</a>
+        {% endif %}
+      </td>
+      <td>
+        {% if mock_chroot.os_release != copr.active_chroots[loop.index0 - 1].os_release or
+        mock_chroot.os_version != copr.active_chroots[loop.index0 - 1].os_version or
+        loop.index0 == 0 %}
+          {# previous os_release-os_version were different or this is the first one #}
+
+            <a href="{{
+                url_for(
+                'coprs_ns.generate_repo_file',
+                username=copr.owner.name,
+                coprname=copr.name,
+                chroot=mock_chroot.os_release+"-"+mock_chroot.os_version,
+                repofile=copr.owner.name+'-'+copr.name+'-'+mock_chroot.os_release+"-"+mock_chroot.os_version+'.repo',
+                _external=True
+              )|fix_url_https_frontend}}">
+            {{ copr.owner.name }}-{{ copr.name }}-{{mock_chroot.os_release+"-"+mock_chroot.os_version}}.repo
+            </a>
+        {% endif %}
+      </td>
+      </tr>
+    {% else %}
+      <tr colspan="2"><td>No active releases</td></tr>
+    {% endfor %}
+  </table>
+  {% if copr.repos_list %}
+    <h2>Repository List</h2>
+    <ul class=repos-list>
+      {% for repo in copr.repos_list %}
+        <li><a href="{{ repo }}">{{ repo }}</a></li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+
+  {% if g.user and g.user.can_edit(copr) and copr and copr.owner and not copr.auto_createrepo %}
+  <dt>
+    <!--<h2>Release options</h2>-->
+  </dt>
+  <dd>
+    <form action="{{
+      url_for(
+        'coprs_ns.copr_createrepo',
+        username=copr.owner.name,
+        coprname=copr.name
+      ) }}" method="post" >
+
+      Automatic repository meta data generation is disabled.
+      You can regenerate it manually or enable the automatic refresh on the edit page.
+      <button type="submit">Regenerate repositories</button>
+    </form>
+  </dd>
+  {% endif %}
+
+{% for chroot in copr.modified_chroots %}
+<div id="dialog-{{chroot.name}}" class="hidden" title="{{chroot.name}} minimal buildroot">
+    <ul>
+        {% for pkg in copr.buildroot_pkgs(chroot).split(" "): %}
+        <li>{{ pkg }}</li>
+        {% endfor %}
+    </ul>
+</div>
+<script>
+    $("#modified-chroot-{{chroot.name}}").click(function(){
+        $("#dialog-{{chroot.name}}").dialog({dialogClass:'chroot-dialog'});
+    });
+</script>
+{% endfor %}
+
+
+  <hr>
+  {{ copr_legal_flag_form(form, copr) }}
+{% endblock %}
