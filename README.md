@@ -1,9 +1,9 @@
 # Copr' Playbooks 
-[Fedora中文社区Copr](http://copr.fdzh.org)
+[Fedora中文社区Copr](https://copr.fdzh.org)
 
 
 
-##提bug：
+##内测阶段，请提bug：
 
 * [新建一个issue](https://github.com/fdzh/Copr/issues/new)；
 * 查找一些额外的资料如[设计文档](https://github.com/fdzh/Copr)和[历史](https://github.com/fdzh/Copr/issues)，确定这是一个新问题，然后给出详细的bug重现步骤；(必填）
