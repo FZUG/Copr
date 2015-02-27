@@ -1,4 +1,4 @@
-# Copr' Playbooks 
+# Copr' Playbooks [![Issues](https://img.shields.io/github/issues/FZUG/Copr.svg)](https://github.com/FZUG/Copr/issues)
 [Fedora中文社区Copr](https://copr.fdzh.org)
 
 
