@@ -152,6 +152,10 @@ class Copr(db.Model, helpers.Serializer):
     owner = db.relationship("User", backref=db.backref("coprs"))
     mock_chroots = association_proxy("copr_chroots", "mock_chroot")
 
+    # enable networking for the builds by default
+    build_enable_net = db.Column(db.Boolean, default=True,
+                                 server_default="1", nullable=False)
+
     __mapper_args__ = {
         "order_by": created_on.desc()
     }
@@ -254,7 +258,7 @@ class Build(db.Model, helpers.Serializer):
     """
 
     id = db.Column(db.Integer, primary_key=True)
-    # list of space separated urls of packages to build
+    # single url to the source rpm, should not contain " ", "\n", "\t"
     pkgs = db.Column(db.Text)
     # built packages
     built_packages = db.Column(db.Text)
@@ -275,6 +279,9 @@ class Build(db.Model, helpers.Serializer):
     memory_reqs = db.Column(db.Integer, default=constants.DEFAULT_BUILD_MEMORY)
     # maximum allowed time of build, build will fail if exceeded
     timeout = db.Column(db.Integer, default=constants.DEFAULT_BUILD_TIMEOUT)
+    # enable networking during a build process
+    enable_net = db.Column(db.Boolean, default=False,
+                           server_default="0", nullable=False)
 
     # relations
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"))
@@ -287,6 +294,23 @@ class Build(db.Model, helpers.Serializer):
     @property
     def chroot_states(self):
         return map(lambda chroot: chroot.status, self.build_chroots)
+
+    def get_chroots_by_status(self, statuses=None):
+        """
+        Get build chroots with states which present in `states` list
+        If states == None, function returns build_chroots
+        """
+        chroot_states_map = dict(zip(self.build_chroots, self.chroot_states))
+        if statuses is not None:
+            statuses = set(statuses)
+        else:
+            return self.build_chroots
+
+        return [
+            chroot for chroot, status in chroot_states_map.items()
+            if status in statuses
+        ]
+
 
     @property
     def has_pending_chroot(self):
@@ -364,6 +388,17 @@ class Build(db.Model, helpers.Serializer):
 
         return self.state in ["succeeded", "canceled", "skipped"]
 
+    @property
+    def src_pkg_name(self):
+        """
+        Extract source package name from URL
+        """
+        src_rpm_name = self.pkgs.split("/")[-1]
+        if src_rpm_name.endswith(".src.rpm"):
+            return src_rpm_name[:-8]
+        else:
+            return src_rpm_name
+
 
 class MockChroot(db.Model, helpers.Serializer):
 
@@ -386,6 +421,21 @@ class MockChroot(db.Model, helpers.Serializer):
         Textual representation of name of this chroot
         """
         return "{0}-{1}-{2}".format(self.os_release, self.os_version, self.arch)
+
+    @property
+    def name_release(self):
+        """
+        Textual representation of name of this or release
+        """
+        return "{}-{}".format(self.os_release, self.os_version)
+
+
+    @property
+    def name_release_human(self):
+        """
+        Textual representation of name of this or release
+        """
+        return "{} {}".format(self.os_release, self.os_version)
 
     @property
     def os(self):
@@ -446,6 +496,9 @@ class BuildChroot(db.Model, helpers.Serializer):
             return helpers.StatusEnum(self.status)
 
         return "unknown"
+
+    def __str__(self):
+        return "<BuildChroot: {}>".format(self.to_dict())
 
 
 class LegalFlag(db.Model, helpers.Serializer):
@@ -540,3 +593,15 @@ class Krb5Login(db.Model, helpers.Serializer):
     primary = db.Column(db.String(80), nullable=False, primary_key=True)
 
     user = db.relationship("User", backref=db.backref("krb5_logins"))
+
+
+class CounterStat(db.Model, helpers.Serializer):
+    """
+    Generic store for simple statistics.
+    """
+
+    name = db.Column(db.String(127), primary_key=True)
+    counter_type = db.Column(db.String(30))
+
+    counter = db.Column(db.Integer, default=0, server_default="0")
+

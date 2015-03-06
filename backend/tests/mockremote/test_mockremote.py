@@ -3,7 +3,7 @@ import copy
 
 from collections import defaultdict
 from bunch import Bunch
-from backend.exceptions import MockRemoteError, CoprSignError
+from backend.exceptions import MockRemoteError, CoprSignError, BuilderError
 
 import tempfile
 import shutil
@@ -73,6 +73,7 @@ class TestMockRemote(object):
         self.mc_builder = patcher.start()
         self.mr = MockRemote(self.HOST, self.JOB, callback=self.mr_cb,
                              macros=self.MACROS, opts=self.OPTS)
+        self.mr.check()
         yield
         patcher.stop()
 
@@ -120,6 +121,7 @@ class TestMockRemote(object):
 
     def test_default_callback(self, f_mock_remote, capsys):
         mr_2 = MockRemote(self.HOST, self.JOB, macros=self.MACROS, opts=self.OPTS)
+        mr_2.check()
         out, err = capsys.readouterr()
 
         assert isinstance(mr_2.callback, DefaultCallBack)
@@ -128,8 +130,9 @@ class TestMockRemote(object):
     def test_no_job_chroot(self, f_mock_remote, capsys):
         job_2 = copy.deepcopy(self.JOB)
         job_2.chroot = None
+        mr_2 = MockRemote(self.HOST, job_2, macros=self.MACROS, opts=self.OPTS)
         with pytest.raises(MockRemoteError):
-            mr_2 = MockRemote(self.HOST, job_2, macros=self.MACROS, opts=self.OPTS)
+            mr_2.check()
 
         out, err = capsys.readouterr()
 
@@ -137,7 +140,7 @@ class TestMockRemote(object):
     def test_add_pubkey(self, mc_get_pubkey, f_mock_remote):
         self.mr.add_pubkey()
         assert mc_get_pubkey.called
-        expected_path = os.path.join(self.DESTDIR, self.CHROOT, "pubkey.gpg")
+        expected_path = os.path.join(self.DESTDIR, "pubkey.gpg")
         assert mc_get_pubkey.call_args == mock.call(
             COPR_OWNER, COPR_NAME, expected_path)
 
@@ -224,15 +227,17 @@ class TestMockRemote(object):
 
     def test_prepare_build_dir_creates_dirs(self, f_mock_remote):
         self.mr.prepare_build_dir()
-        assert os.path.exists(self.DESTDIR_CHROOT)
+        target_dir = os.path.join(
+            self.DESTDIR, self.CHROOT,
+            "{}-{}".format(self.PKG_NAME, self.PKG_VERSION))
+        assert os.path.exists(target_dir)
 
     def test_build_pkg_and_process_results(self, f_mock_remote):
         self.mr.on_success_build = MagicMock()
         self.mr.mark_dir_with_build_id = MagicMock()
 
         build_details = MagicMock()
-        self.mr.builder.build.return_value = (True, STDOUT, STDERR, build_details)
-        self.mr.builder.download.return_value = (True, STDOUT, STDERR)
+        self.mr.builder.build.return_value = (build_details, STDOUT)
 
         result = self.mr.build_pkg_and_process_results()
 
@@ -251,8 +256,8 @@ class TestMockRemote(object):
         assert os.path.exists(os.path.join(self.DESTDIR_CHROOT, "mockchain.log"))
 
     def test_build_pkg_and_process_results_error_on_download(self, f_mock_remote):
-        self.mr.builder.build.return_value = (True, STDOUT, STDERR, {})
-        self.mr.builder.download.return_value = (False, STDOUT, STDERR)
+        self.mr.builder.build.return_value = ({}, STDOUT)
+        self.mr.builder.download.side_effect = BuilderError(msg="STDERR")
 
         self.mr.mark_dir_with_build_id = MagicMock()
         self.mr.on_success_build = MagicMock()
@@ -264,8 +269,9 @@ class TestMockRemote(object):
         assert not os.path.exists(os.path.join(self.DESTDIR_CHROOT, "mockchain.log"))
 
     def test_build_pkg_and_process_results_error_on_build(self, f_mock_remote):
-        self.mr.builder.build.return_value = (False, STDOUT, STDERR, {})
-        self.mr.builder.download.return_value = (True, STDOUT, STDERR)
+        # self.mr.builder.build.return_value = ({}, STDOUT)
+        self.mr.builder.build.side_effect = BuilderError(msg="STDERR")
+        # self.mr.builder.download.return_value = BuilderError(msg="STDERR")
 
         self.mr.mark_dir_with_build_id = MagicMock()
         self.mr.on_success_build = MagicMock()
@@ -279,7 +285,18 @@ class TestMockRemote(object):
 
     def test_mark_dir_with_build_id(self, f_mock_remote):
         # TODO: create real test
+        os.makedirs(os.path.join(self.DESTDIR_CHROOT,
+                                 "{}-{}".format(self.PKG_NAME, self.PKG_VERSION)))
+
+        info_file_path = os.path.join(self.DESTDIR_CHROOT,
+                                      "{}-{}".format(self.PKG_NAME, self.PKG_VERSION),
+                                      "build.info")
+        assert not os.path.exists(info_file_path)
         self.mr.mark_dir_with_build_id()
+
+        assert os.path.exists(info_file_path)
+        with open(info_file_path) as handle:
+            assert str(self.JOB.build_id) in handle.read()
 
     def test_build_pkgs_ignore_error_once(self, f_mock_remote):
         err_msg = "error message"

@@ -4,13 +4,14 @@ import copy
 from collections import defaultdict
 from pprint import pprint
 from bunch import Bunch
-from backend.exceptions import BuilderError, BuilderTimeOutError
+from backend.exceptions import BuilderError, BuilderTimeOutError, AnsibleCallError, AnsibleResponseError
 
 import tempfile
 import shutil
 import os
 
 import six
+from backend.job import BuildJob
 
 if six.PY3:
     from unittest import mock
@@ -20,6 +21,7 @@ else:
     from mock import patch, MagicMock
 
 import pytest
+from types import MethodType
 
 import backend.mockremote.builder as builder_module
 from backend.mockremote.builder import Builder
@@ -44,6 +46,13 @@ def assert_in_log(msg, log_list):
     assert any(msg in record for record in log_list)
 
 
+STDOUT = "stdout"
+STDERR = "stderr"
+COPR_OWNER = "copr_owner"
+COPR_NAME = "copr_name"
+COPR_VENDOR = "vendor"
+
+
 class TestBuilder(object):
     BUILDER_BUILDROOT_PKGS = []
     BUILDER_CHROOT = "fedora-20-i386"
@@ -65,10 +74,23 @@ class TestBuilder(object):
     )
 
     def get_test_builder(self):
+        self.job = BuildJob({
+            "project_owner": COPR_OWNER,
+            "project_name": COPR_NAME,
+            "pkgs": self.BUILDER_PKG,
+            "repos": "",
+            "build_id": 12345,
+            "chroot": self.BUILDER_CHROOT,
+        }, Bunch({
+            "timeout": 1800,
+            "destdir": self.test_root_path,
+            "results_baseurl": "/tmp/",
+        }))
         builder = Builder(
             opts=self.opts,
             hostname=self.BUILDER_HOSTNAME,
             username=self.BUILDER_USER,
+            job=self.job,
             timeout=self.BUILDER_TIMEOUT,
             chroot=self.BUILDER_CHROOT,
             buildroot_pkgs=self.BUILDER_BUILDROOT_PKGS,
@@ -151,7 +173,7 @@ class TestBuilder(object):
                     }, self.BUILDER_HOSTNAME
                 ],
                 "kwargs": {},
-                "expected_return": (False, {}),
+                "expected_return": None,
                 "expected_exception": None
             },
             {
@@ -162,10 +184,8 @@ class TestBuilder(object):
                     }, self.BUILDER_HOSTNAME
                 ],
                 "kwargs": {},
-                "expected_return": (
-                    True,
-                    {"msg": "Error: Could not contact/connect to {}.".format(self.BUILDER_HOSTNAME)}),
-                "expected_exception": None
+                "expected_return": None,
+                "expected_exception": AnsibleResponseError
             },
             {
                 "args": [
@@ -180,7 +200,7 @@ class TestBuilder(object):
                     }, self.BUILDER_HOSTNAME
                 ],
                 "kwargs": {},
-                "expected_return": (False, {"rc": 0}),
+                "expected_return": None,
                 "expected_exception": None
             },
             {
@@ -196,17 +216,10 @@ class TestBuilder(object):
                     }, self.BUILDER_HOSTNAME
                 ],
                 "kwargs": {},
-                "expected_return": (
-                    True, {
-                        "rc": 1,
-                        "msg": "rc 1 not in success_codes",
-                        "stdout": "stdout",
-                        "stderr": "stderr",
-
-                    }),
-                "expected_exception": None
+                "expected_return": None,
+                "expected_exception": AnsibleResponseError
             },
-            {
+            {  # 5
                 "args": [
                     {
                         "dark": {},
@@ -220,8 +233,8 @@ class TestBuilder(object):
                     }, self.BUILDER_HOSTNAME
                 ],
                 "kwargs": {"success_codes": [0, 1]},
-                "expected_return": (False, {"rc": 1}),
-                "expected_exception": None
+                "expected_return": None,
+                "expected_exception": None,
             },
             {
                 "args": [
@@ -231,14 +244,12 @@ class TestBuilder(object):
                             "rc": 2,
                             "stdout": "stdout",
                             "stderr": "stderr",
-                            "stdother": "stdother",
                         }}
                     }, self.BUILDER_HOSTNAME
                 ],
-                "kwargs": {"err_codes": [2, 3], "return_on_error": ["stdother"]},
-                "expected_return": (True, {"rc": 2, "msg": "rc 2 matched err_codes",
-                                           "stdother": "stdother"}),
-                "expected_exception": None
+                "kwargs": {"err_codes": [2, 3]},
+                "expected_return": None,
+                "expected_exception": AnsibleResponseError
             },
             {
                 "args": [
@@ -253,11 +264,11 @@ class TestBuilder(object):
                     }, self.BUILDER_HOSTNAME
                 ],
                 "kwargs": {},
-                "expected_return": (True, {"msg": "results included failed as true",
-                                           "stdout": "stdout", "stderr": "stderr"}),
-                "expected_exception": None
+                "expected_return": None,
+                "expected_exception": AnsibleResponseError
             }
         ]
+        # counter = 0
         for case in cases:
             if case["expected_exception"]:
                 with pytest.raises(case["expected_exception"]):
@@ -265,6 +276,9 @@ class TestBuilder(object):
             else:
                 result = tested_func(*case["args"], **case["kwargs"])
                 assert result == case["expected_return"]
+
+            # counter += 1
+            # print("\nCounter {} passed".format(counter))
 
     def test_get_ans_results(self):
         result_obj = "RESULT_STRING"
@@ -283,7 +297,7 @@ class TestBuilder(object):
 
     def test_check_not_repeated(self):
         builder = self.get_test_builder()
-        assert builder.check() == (True, [])
+        builder.check()
         assert not builder.conn.called
         assert not builder.root_conn.called
 
@@ -309,7 +323,6 @@ class TestBuilder(object):
 
         builder.conn.run.side_effect = ans_run
         with pytest.raises(BuilderError) as err:
-            builder.checked = False
             builder.check()
 
         # import ipdb; ipdb.set_trace()
@@ -331,46 +344,37 @@ class TestBuilder(object):
 
         builder.conn.run.side_effect = ans_run
         with pytest.raises(BuilderError) as err:
-            builder.checked = False
             builder.check()
 
         assert "/usr/bin/test -f /usr/bin/mockchain" in self.stage_ctx[1]["conn"].module_args
-        assert "/usr/bin/test -f /etc/mock/{}.cfg".format(self.BUILDER_CHROOT) in \
-               self.stage_ctx[1]["conn"].module_args
+        # assert "/usr/bin/test -f /etc/mock/{}.cfg".format(self.BUILDER_CHROOT) in \
+        #        self.stage_ctx[1]["conn"].module_args
 
-        assert "lacks mockchain binary or mock config for chroot " in \
-               err.value.msg
+        assert "missing mockchain binary" in err.value.msg
 
-    def test_check_missing_alt_err_messages(self):
+    def test_check_missing_mock_config(self):
         builder = self.get_test_builder()
+
+        ret_map = {
+            0: {"contacted": {self.BUILDER_HOSTNAME: {"rc": "0", }}},
+            1: {"contacted": {self.BUILDER_HOSTNAME: {"rc": "0", }}},
+            2: {"contacted": {self.BUILDER_HOSTNAME: {"failed": "fatal_2", }}}
+        }
 
         def ans_run():
             self.stage_ctx[self.stage]["conn"] = copy.deepcopy(builder.conn)
-            ret_map = {
-                0: {"contacted": {self.BUILDER_HOSTNAME: {"failed": "fatal_1", }}},
-                1: {"contacted": {self.BUILDER_HOSTNAME: {"failed": "fatal_2", }}}
-            }
             self.stage += 1
             return ret_map[self.stage - 1]
 
         builder.conn.run.side_effect = ans_run
         with pytest.raises(BuilderError) as err:
-            builder.checked = False
             builder.check()
 
         assert "/usr/bin/test -f /usr/bin/mockchain" in self.stage_ctx[1]["conn"].module_args
         assert "/usr/bin/test -f /etc/mock/{}.cfg".format(self.BUILDER_CHROOT) in \
-               self.stage_ctx[1]["conn"].module_args
+               self.stage_ctx[2]["conn"].module_args
 
-        assert "results included failed as true" in err.value.msg
-
-    def test_check_set_checked(self):
-        builder = self.get_test_builder()
-
-        builder.conn.run.return_value = {"contacted": {self.BUILDER_HOSTNAME: {"rc": 0, }}}
-        builder.checked = False
-        builder.check()
-        assert builder.checked
+        assert "missing mock config for chroot" in err.value.msg
 
     def test_tempdir_nop_when_provided(self):
         builder = self.get_test_builder()
@@ -433,57 +437,79 @@ class TestBuilder(object):
         ]:
             with pytest.raises(BuilderError) as err:
                 builder.buildroot_pkgs = bad_pkg
-                builder.modify_base_buildroot()
+                builder.modify_mock_chroot_config()
 
     def test_modify_base_buildroot_on_error(self, ):
+        storage = []
+
+        def fake_run_ansible(self, cmd, *args, **kwargs):
+            storage.append(cmd)
+            raise AnsibleCallError("", "", "", True)
+
         builder = self.get_test_builder()
+        builder.run_ansible_with_check = MethodType(fake_run_ansible, builder)
         br_pkgs = "foo bar"
         builder.buildroot_pkgs = br_pkgs
-        builder.root_conn.run.return_value = {
-            "contacted": {self.BUILDER_HOSTNAME: {"rc": 1, "stdout": None}},
-            "dark": {}
-        }
 
-        builder.modify_base_buildroot()
+        with pytest.raises(BuilderError) as err:
+            builder.modify_mock_chroot_config()
 
         assert_in_log("putting {} into minimal buildroot of fedora-20-i386".format(br_pkgs),
                       self._cb_log)
-
-        assert not builder.conn.run.called
-        assert builder.root_conn.run.called
 
         expected = (
             "dest=/etc/mock/{}.cfg "
             "line=\"config_opts['chroot_setup_cmd'] = 'install @buildsys-build {}'\" "
             "regexp=\"^.*chroot_setup_cmd.*$\""
         ).format(self.BUILDER_CHROOT, br_pkgs)
-        assert builder.root_conn.module_args == expected
 
+        assert any([expected in r for r in storage])
         assert_in_log("Error: ", self._cb_log[1:])
 
     def test_modify_base_buildroot(self, ):
+        storage = []
+
+        def fake_run_ansible(self, cmd, *args, **kwargs):
+            storage.append(cmd)
+
         builder = self.get_test_builder()
+        builder.run_ansible_with_check = MethodType(fake_run_ansible, builder)
         br_pkgs = "foo bar"
         builder.buildroot_pkgs = br_pkgs
+        builder.modify_mock_chroot_config()
+        assert_in_log("putting {} into minimal buildroot of fedora-20-i386".format(br_pkgs),
+                      self._cb_log)
+
+        expected = (
+            "dest=/etc/mock/{}.cfg "
+            "line=\"config_opts['chroot_setup_cmd'] = 'install @buildsys-build {}'\" "
+            "regexp=\"^.*chroot_setup_cmd.*$\""
+        ).format(self.BUILDER_CHROOT, br_pkgs)
+
+        assert any([expected in r for r in storage])
+
+    def test_modify_chroot_disable_networking(self):
+        storage = []
+
+        def fake_run_ansible(self, cmd, *args, **kwargs):
+            storage.append(cmd)
+
+        builder = self.get_test_builder()
+        builder.run_ansible_with_check = MethodType(fake_run_ansible, builder)
         builder.root_conn.run.return_value = {
             "contacted": {self.BUILDER_HOSTNAME: {"rc": 0, "stdout": None}},
             "dark": {}
         }
 
-        builder.modify_base_buildroot()
-
-        assert_in_log("putting {} into minimal buildroot of fedora-20-i386".format(br_pkgs),
-                      self._cb_log)
-
-        assert not builder.conn.run.called
-        assert builder.root_conn.run.called
+        self.job.enable_net = False
+        # net should be disabled
+        builder.modify_mock_chroot_config()
 
         expected = (
-            "dest=/etc/mock/{}.cfg "
-            "line=\"config_opts['chroot_setup_cmd'] = 'install @buildsys-build {}'\" "
-            "regexp=\"^.*chroot_setup_cmd.*$\""
-        ).format(self.BUILDER_CHROOT, br_pkgs)
-        assert builder.root_conn.module_args == expected
+            'dest=/etc/mock/fedora-20-i386.cfg '
+            'line="config_opts[\'use_host_resolv\'] = False" '
+            'regexp="^.*user_host_resolv.*$"')
+        assert any([expected in r for r in storage])
 
     def test_collect_build_packages(self):
         builder = self.get_test_builder()
@@ -505,19 +531,63 @@ class TestBuilder(object):
         assert builder.conn.module_args == expected
 
     @mock.patch("backend.mockremote.builder.check_for_ans_error")
+    def test_run_ansible_with_check(self, mc_check_for_ans_errror):
+        builder = self.get_test_builder()
+
+        cmd = "cmd"
+        module_name = "module_name"
+        as_root = True
+
+        err_codes = [1, 3, 7, ]
+        success_codes = [0, 255]
+
+        results = mock.MagicMock()
+
+        err_results = mock.MagicMock()
+
+        mc_check_for_ans_errror.return_value = (False, [])
+        builder._run_ansible = mock.MagicMock()
+        builder._run_ansible.return_value = results
+
+        got_results = builder.run_ansible_with_check(
+            cmd, module_name, as_root, err_codes, success_codes)
+
+        assert results == got_results
+        expected_call_run = mock.call(cmd, module_name, as_root)
+        assert expected_call_run == builder._run_ansible.call_args
+        expected_call_check = mock.call(results, builder.hostname,
+                                        err_codes, success_codes)
+        assert expected_call_check == mc_check_for_ans_errror.call_args
+
+        mc_check_for_ans_errror.side_effect = AnsibleResponseError(msg="err message", **err_results)
+
+        with pytest.raises(AnsibleCallError):
+            builder.run_ansible_with_check(
+                cmd, module_name, as_root, err_codes, success_codes)
+
+
+
+    @mock.patch("backend.mockremote.builder.check_for_ans_error")
     def test_check_build_success(self, mc_check_for_ans_errror):
         builder = self.get_test_builder()
 
-        mc_check_for_ans_errror.return_value = "is_err", "err_results"
+        builder.check_build_success(self.BUILDER_PKG)
 
-        results = builder.check_build_success(self.BUILDER_PKG, {
-            "contacted": {self.BUILDER_HOSTNAME: {"rc": 0,
-                                                  "stdout": "stdout",
-                                                  "stderr": "stderr"}},
-            "dark": {}
-        })
+        expected_ans_args = (
+            "/usr/bin/test -f "
+            "/tmp/copr-backend-test-tmp/build/results/"
+            "{}/{}/success"
+        ).format(self.BUILDER_CHROOT, self.BUILDER_PKG_BASE)
+        assert expected_ans_args == builder.conn.module_args
 
-        assert ("stderr", "is_err", "stdout") == results
+    @mock.patch("backend.mockremote.builder.check_for_ans_error")
+    def test_check_build_exception(self, mc_check_for_ans_errror):
+        builder = self.get_test_builder()
+
+        mc_check_for_ans_errror.side_effect = AnsibleResponseError(msg="err msg")
+
+        with pytest.raises(BuilderError):
+            builder.check_build_success(self.BUILDER_PKG)
 
         expected_ans_args = (
             "/usr/bin/test -f "
@@ -543,29 +613,6 @@ class TestBuilder(object):
         dest = builder.check_if_pkg_local_or_http(self.BUILDER_PKG)
 
         assert dest == self.BUILDER_PKG
-
-    def test_get_package_version(self):
-        # TODO: pathc run_ansible with local cmd execution and put a real .src.rpm
-        builder = self.get_test_builder()
-
-        builder.conn.run.return_value = {
-            "contacted": {self.BUILDER_HOSTNAME: {"rc": 0,
-                                                  "stdout": "stdout",
-                                                  "stderr": "stderr"}},
-            "dark": {}
-        }
-
-        assert "stdout" == builder.get_package_version(self.BUILDER_PKG_BASE + ".src.rpm")
-        assert builder.conn.module_args == "rpm -qp --qf \"%{{VERSION}}\" {}.src.rpm".format(self.BUILDER_PKG_BASE)
-
-    def test_get_package_version_not_contacted(self):
-        # TODO: pathc run_ansible with local cmd execution and put a real .src.rpm
-        builder = self.get_test_builder()
-
-        builder.conn.run.return_value = {}
-
-        assert builder.get_package_version(self.BUILDER_PKG_BASE + ".src.rpm") is None
-        assert builder.conn.module_args == "rpm -qp --qf \"%{{VERSION}}\" {}.src.rpm".format(self.BUILDER_PKG_BASE)
 
     def test_get_mockchain_command(self):
         builder = self.get_test_builder()
@@ -623,7 +670,7 @@ class TestBuilder(object):
 
         mc_time.return_value = None
 
-        with pytest.raises(BuilderTimeOutError):
+        with pytest.raises(BuilderTimeOutError) as error:
             builder.run_command_and_wait(build_cmd)
 
     @mock.patch("backend.mockremote.builder.time")
@@ -660,26 +707,72 @@ class TestBuilder(object):
             mc_cmd.communicate.return_value = self.STDOUT, self.STDERR
             mc_cmd.returncode = ret_code
             mc_popen.return_value = mc_cmd
-            success, stdout, stderr = builder.download(self.BUILDER_PKG, self.BUILDER_REMOTE_BASEDIR)
+            if expected_success:
+                builder.download(self.BUILDER_PKG, self.BUILDER_REMOTE_BASEDIR)
+            else:
+                with pytest.raises(BuilderError) as err:
+                    builder.download(self.BUILDER_PKG, self.BUILDER_REMOTE_BASEDIR)
+                assert err.value.return_code == ret_code
+                # assert err.value.stderr == self.STDERR
+                # assert err.value.stdout == self.STDOUT
 
-            expected = (
+            #import ipdb; ipdb.set_trace()
+            expected_arg = (
                 "/usr/bin/rsync -avH -e 'ssh -o PasswordAuthentication=no -o StrictHostKeyChecking=no'"
                 " copr_builder@example.com:/tmp/copr-backend-test-tmp/build/results/fedora-20-i386/foovar-2.41.f21 "
-                "'/tmp/copr-backend-test'/")
+                "'/tmp/copr-backend-test'/ &> '/tmp/copr-backend-test'/build-12345.rsync.log")
 
-            assert mc_popen.call_args[0][0] == expected
-            assert expected_success == success
-            assert stdout == self.STDOUT
-            assert stderr == self.STDERR
+            assert mc_popen.call_args[0][0] == expected_arg
+
+    @mock.patch("backend.mockremote.builder.Popen")
+    def test_download_popen_error(self, mc_popen):
+        builder = self.get_test_builder()
+        mc_popen.side_effect = IOError()
+        with pytest.raises(BuilderError):
+            builder.download(self.BUILDER_PKG, self.BUILDER_REMOTE_BASEDIR)
+
+    def test_update_package_version(self):
+        builder = self.get_test_builder()
+
+        # (response, expected)
+        test_plan = [
+            ("$$1.34$$", "1.34"),
+            ("$$1.34$$(none)", "1.34"),
+            ("(none)$$1.34$$(none)", "1.34"),
+            ("(none)$$1.34$$", "1.34"),
+            ("(none)$$1.34$$435", "1.34-435"),
+            ("2$$1.34$$435", "2:1.34-435"),
+            ("2$$1.34$$", "2:1.34"),
+        ]
+
+        self._response = ""
+
+        def fake_run_ansible(self_, pkg):
+            return {
+                "contacted": {
+                    self.BUILDER_HOSTNAME: {
+                        "rc": "0", "stdout": self._response
+                    }
+                }
+            }
+
+        builder._run_ansible = MethodType(fake_run_ansible, builder)
+        builder.update_job_pkg_version(self.BUILDER_PKG)
+
+        assert builder.job.pkg_version == ""
+
+        for resp, expected in test_plan:
+            self._response = resp
+            builder.update_job_pkg_version(self.BUILDER_PKG)
+            assert builder.job.pkg_version == expected
 
     def test_build(self):
         builder = self.get_test_builder()
-        builder.modify_base_buildroot = MagicMock()
+        builder.modify_mock_chroot_config = MagicMock()
         builder.check_if_pkg_local_or_http = MagicMock()
         builder.check_if_pkg_local_or_http.return_value = self.BUILDER_PKG
 
-        builder.get_package_version = MagicMock()
-        builder.get_package_version.return_value = None
+        builder.update_job_pkg_version = MagicMock()
 
         builder.run_command_and_wait = MagicMock()
         successful_wait_result = {
@@ -695,35 +788,29 @@ class TestBuilder(object):
 
         builder.collect_built_packages = MagicMock()
 
-        success, stdout, stderr, build_details = builder.build(self.BUILDER_PKG)
-        assert success
+        build_details, stdout = builder.build(self.BUILDER_PKG)
         assert stdout == self.STDOUT
-        assert stderr == self.STDERR
-        assert builder.modify_base_buildroot.called
+
+        assert builder.modify_mock_chroot_config.called
         assert builder.check_if_pkg_local_or_http.called
         assert builder.run_command_and_wait.called
         assert builder.check_build_success.called
         assert builder.collect_built_packages
-        assert build_details == {}
 
-        # test providing version
-        builder.get_package_version.return_value = "srpm_version"
-        success, stdout, stderr, build_details = builder.build(self.BUILDER_PKG)
-
-        assert "pkg_version" in build_details
-        assert build_details["pkg_version"] == "srpm_version"
+        # test providing version / obsolete
+        builder.build(self.BUILDER_PKG)
 
         # test timeout handle
         builder.run_command_and_wait.side_effect = BuilderTimeOutError("msg")
-        success, stdout, stderr, build_details = builder.build(self.BUILDER_PKG)
-        assert not success
-        assert stderr == "Timeout expired"
-        assert build_details["pkg_version"] == "srpm_version"
+
+        with pytest.raises(BuilderError) as error:
+            builder.build(self.BUILDER_PKG)
+
+        assert error.value.msg == "msg"
 
         # remove timeout
         builder.run_command_and_wait.side_effect = None
-        success, stdout, stderr, build_details = builder.build(self.BUILDER_PKG)
-        assert success
+        builder.build(self.BUILDER_PKG)
 
         # error inside wait result
         unsuccessful_wait_result = {
@@ -733,25 +820,24 @@ class TestBuilder(object):
             "dark": {}
         }
         builder.run_command_and_wait.return_value = unsuccessful_wait_result
-        success, stdout, stderr, build_details = builder.build(self.BUILDER_PKG)
-        assert not success
+        with pytest.raises(BuilderError):
+            builder.build(self.BUILDER_PKG)
 
         # make wait result successful again
         builder.run_command_and_wait.return_value = successful_wait_result
-        # error during build check
-        builder.check_build_success.return_value = (self.STDERR, True, self.STDOUT)
-        assert not success
-        assert stdout == self.STDOUT
-        assert stderr == self.STDERR
-
-        # revert to successful check build
-        builder.check_build_success.return_value = (self.STDERR, False, self.STDOUT)
+        # # error during build check
+        # builder.check_build_success.return_value = (self.STDERR, True, self.STDOUT)
+        # assert not success
+        # assert stdout == self.STDOUT
+        # assert stderr == self.STDERR
+        #
+        # # revert to successful check build
+        # builder.check_build_success.return_value = (self.STDERR, False, self.STDOUT)
 
         # check update build details
         def upd(bd, pkg):
             bd["foo"] = "bar"
 
         builder.collect_built_packages.side_effect = upd
-        success, stdout, stderr, build_details = builder.build(self.BUILDER_PKG)
-        assert success
+        build_details, stdout = builder.build(self.BUILDER_PKG)
         assert build_details["foo"] == "bar"

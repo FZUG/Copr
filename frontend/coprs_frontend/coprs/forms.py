@@ -28,14 +28,30 @@ class UrlListValidator(object):
 
     def is_url(self, url):
         parsed = urlparse.urlparse(url)
-        is_url = True
-
         if not parsed.scheme.startswith("http"):
-            is_url = False
+            return False
         if not parsed.netloc:
-            is_url = False
+            return False
+        return True
 
-        return is_url
+
+class UrlRepoListValidator(UrlListValidator):
+    """ Allows also `repo://` schema"""
+    def is_url(self, url):
+        parsed = urlparse.urlparse(url)
+        if parsed.scheme not in ["http", "https", "copr"]:
+            return False
+        if not parsed.netloc:
+            return False
+        #  copr://username/projectname
+        #  ^^ schema ^^ netlock  ^^ path
+        if parsed.scheme == "copr":
+            # check if projectname missed
+            path_split = parsed.path.split("/")
+            if len(path_split) < 2 or path_split[1] == "":
+                return False
+
+        return True
 
 
 class CoprUniqueNameValidator(object):
@@ -117,7 +133,7 @@ class CoprFormFactory(object):
 
             repos = wtforms.TextAreaField(
                 "Repos",
-                validators=[UrlListValidator()],
+                validators=[UrlRepoListValidator()],
                 filters=[StringListFilter()])
 
             initial_pkgs = wtforms.TextAreaField(
@@ -126,6 +142,7 @@ class CoprFormFactory(object):
                 filters=[StringListFilter()])
 
             disable_createrepo = wtforms.BooleanField(default=False)
+            build_enable_net = wtforms.BooleanField(default=True)
 
             @property
             def selected_chroots(self):
@@ -219,6 +236,8 @@ class BuildFormFactory(object):
                         min=constants.MIN_BUILD_TIMEOUT,
                         max=constants.MAX_BUILD_TIMEOUT)],
                 default=constants.DEFAULT_BUILD_TIMEOUT)
+
+            enable_net = wtforms.BooleanField()
 
         F.chroots_list = map(lambda x: x.name, active_chroots)
         F.chroots_list.sort()
@@ -315,7 +334,7 @@ class CoprModifyForm(wtf.Form):
                                          validators=[wtforms.validators.Optional()])
 
     repos = wtforms.TextAreaField('Repos',
-                                  validators=[UrlListValidator(),
+                                  validators=[UrlRepoListValidator(),
                                               wtforms.validators.Optional()],
                                   filters=[StringListFilter()])
 

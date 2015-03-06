@@ -28,7 +28,7 @@ class Config(object):
 
     # logging options
     SEND_LOGS_TO = ["root@localhost"]
-    LOGGING_LEVEL = logging.ERROR
+    LOGGING_LEVEL = logging.DEBUG
 
     SEND_LEGAL_TO = ["root@localhost"]
 
@@ -39,6 +39,12 @@ class Config(object):
     ENFORCE_PROTOCOL_FOR_FRONTEND_URL = None
 
     PUBLIC_COPR_HOSTNAME = "copr-fe-dev.cloud.fedoraproject.org"
+
+    # primary log file
+    LOG_FILENAME = "/var/log/copr/frontend.log"
+
+    INTRANET_IPS = ["127.0.0.1"]
+    DEBUG = True
 
 
 class ProductionConfig(Config):

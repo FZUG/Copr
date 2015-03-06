@@ -27,6 +27,7 @@ class BuildJob(object):
 
         self.timeout = worker_opts.timeout
         self.memory_reqs = None
+        self.enable_net = True
 
         self.project_owner = None
         self.project_name = None
@@ -46,7 +47,7 @@ class BuildJob(object):
             key = str(key)
             setattr(self, key, val)
 
-        self.pkg = task_data["pkgs"].split(" ")[0]  # just for now
+        self.pkg = task_data["pkgs"]
         del self.pkgs  # better to produce error, than use it blindly
 
         self.repos = [r for r in task_data["repos"].split(" ") if r.strip()]
@@ -64,8 +65,20 @@ class BuildJob(object):
             task_data["project_name"] + "/"
         ])
 
-        self.pkg_version = ""
+        self.pkg_main_version = ""
+        self.pkg_epoch = None
+        self.pkg_release = None
+
         self.built_packages = ""
+
+    @property
+    def pkg_name(self):
+        mb_name = self.pkg.split("/")[-1]
+        if mb_name:
+            mb_name = mb_name.replace(".src.rpm", "")
+            return mb_name
+        else:
+            return self.pkg
 
     def update(self, data_dict):
         """
@@ -82,12 +95,30 @@ class BuildJob(object):
         """
         result = copy.deepcopy(self.__dict__)
         result["id"] = self.build_id
+        result["pkg_version"] = self.pkg_version
 
         return result
+
+    @property
+    def pkg_version(self):
+        """
+        Canonical version presentation release and epoch
+        "{epoch}:{version}-{release}"
+        """
+        if self.pkg_main_version is None:
+            return None
+        if self.pkg_epoch:
+            full_version = "{}:{}".format(self.pkg_epoch, self.pkg_main_version)
+        else:
+            full_version = "{}".format(self.pkg_main_version)
+
+        if self.pkg_release:
+            full_version += "-{}".format(self.pkg_release)
+        return full_version
 
     def __str__(self):
         return str(self.__unicode__())
 
     def __unicode__(self):
         return u"BuildJob<id: {build_id}, owner: {project_owner}, " \
-               u"project: {project_name}, source pkg : {pkg} >".format(self.__dict__)
+               u"project: {project_name}, source pkg : {pkg} >".format(**self.__dict__)

@@ -33,6 +33,14 @@ COPR_NAME = "copr_name"
 COPR_VENDOR = "vendor"
 
 
+@pytest.yield_fixture
+def mc_register_build_result(*args, **kwargs):
+    patcher = mock.patch("backend.daemons.dispatcher.register_build_result")
+    obj = patcher.start()
+    yield obj
+    patcher.stop()
+
+
 class TestDispatcher(object):
 
     def setup_method(self, method):
@@ -92,6 +100,8 @@ class TestDispatcher(object):
             timeout=1800,
             destdir=self.tmp_dir_path,
             results_baseurl="/tmp",
+
+            consecutive_failure_threshold=10,
         )
         self.job = BuildJob(self.task, self.opts)
 
@@ -170,7 +180,7 @@ class TestDispatcher(object):
         with pytest.raises(CoprWorkerError):
             self.worker.spawn_instance_with_check()
 
-    def test_spawn_instance_with_check_ansible_error_reraised(self, init_worker):
+    def test_spawn_instance_with_check_ansible_error_reraised(self, init_worker, mc_register_build_result):
         self.worker.spawn_instance = MagicMock()
         self.worker.spawn_instance.side_effect = AnsibleError("foobar")
 
@@ -310,7 +320,7 @@ class TestDispatcher(object):
         self.worker.terminate_instance()
         assert mc_run_ans.called
         expected_call = mock.call(
-            "-c ssh -i '{},' {} ".format(self.vm_ip, self.terminate_pb),
+            "-c ssh {} ".format(self.terminate_pb),
             'terminate instance')
         assert expected_call == mc_run_ans.call_args
         assert self.worker.vm_ip is None
@@ -324,8 +334,8 @@ class TestDispatcher(object):
         self.worker.terminate_instance()
         assert mc_run_ans.called
         expected_call = mock.call(
-            '-c ssh -i \'{},\' {} --extra-vars=\'{{"copr_task": {{"vm_name": "{}"}}}}\''
-            .format(self.vm_ip, self.terminate_pb, self.vm_name),
+            '-c ssh {} --extra-vars=\'{{"copr_task": {{"vm_name": "{}"}}}}\''
+            .format(self.terminate_pb, self.vm_name),
             'terminate instance')
 
         assert expected_call == mc_run_ans.call_args
@@ -341,9 +351,9 @@ class TestDispatcher(object):
         assert mc_run_ans.called
 
         expected_call = mock.call(
-            '-c ssh -i \'{},\' {} --extra-vars=\''
+            '-c ssh {} --extra-vars=\''
             '{{"copr_task": {{"vm_name": "{}", "ip": "{}"}}}}\''
-            .format(self.vm_ip, self.terminate_pb, self.vm_name, self.vm_ip),
+            .format(self.terminate_pb, self.vm_name, self.vm_ip),
             'terminate instance')
 
         assert expected_call == mc_run_ans.call_args
@@ -471,8 +481,9 @@ class TestDispatcher(object):
              'destdir': self.DESTDIR,
              'started_on': None, 'submitted_on': None, 'chroot': 'fedora-20-x86_64',
              'ended_on': None, 'built_packages': '', 'timeout': 1800, 'pkg_version': '',
+             'pkg_epoch': None, 'pkg_main_version': '', 'pkg_release': None,
              'memory_reqs': None, 'buildroot_pkgs': None, 'id': self.job_build_id,
-             'pkg': self.SRC_PKG_URL}
+             'pkg': self.SRC_PKG_URL, "enable_net": True}
         ]})
 
         assert expected_call == self.worker_fe_callback.update.call_args
@@ -499,8 +510,9 @@ class TestDispatcher(object):
              'destdir': self.DESTDIR,
              'started_on': self.job.started_on, 'submitted_on': None, 'chroot': 'fedora-20-x86_64',
              'ended_on': self.job.ended_on, 'built_packages': '', 'timeout': 1800, 'pkg_version': '',
+             'pkg_epoch': None, 'pkg_main_version': '', 'pkg_release': None,
              'memory_reqs': None, 'buildroot_pkgs': None, 'id': self.job_build_id,
-             'pkg': self.SRC_PKG_URL}
+             'pkg': self.SRC_PKG_URL, "enable_net": True}
         ]})
 
         assert expected_call == self.worker_fe_callback.update.call_args
@@ -545,7 +557,7 @@ class TestDispatcher(object):
         assert not mc_mr.called
 
     @mock.patch("backend.daemons.dispatcher.MockRemote")
-    def test_do_job(self, mc_mr_class, init_worker, reg_vm):
+    def test_do_job(self, mc_mr_class, init_worker, reg_vm, mc_register_build_result):
         assert not os.path.exists(self.DESTDIR_CHROOT)
 
         self.worker.frontend_callback = self.worker_fe_callback
@@ -554,7 +566,7 @@ class TestDispatcher(object):
         assert os.path.exists(self.DESTDIR_CHROOT)
 
     @mock.patch("backend.daemons.dispatcher.MockRemote")
-    def test_do_job_updates_details(self, mc_mr_class, init_worker, reg_vm):
+    def test_do_job_updates_details(self, mc_mr_class, init_worker, reg_vm, mc_register_build_result):
         assert not os.path.exists(self.DESTDIR_CHROOT)
         mc_mr_class.return_value.build_pkg.return_value = {
             "results": self.test_time,
@@ -567,7 +579,8 @@ class TestDispatcher(object):
         assert os.path.exists(self.DESTDIR_CHROOT)
 
     @mock.patch("backend.daemons.dispatcher.MockRemote")
-    def test_do_job_mr_error(self, mc_mr_class, init_worker, reg_vm):
+    def test_do_job_mr_error(self, mc_mr_class, init_worker,
+                             reg_vm, mc_register_build_result):
         mc_mr_class.return_value.build_pkg.side_effect = MockRemoteError("foobar")
 
         self.worker.frontend_callback = self.worker_fe_callback
@@ -787,8 +800,7 @@ class TestDispatcher(object):
 
         mc_do_job.side_effect = stop_loop
 
-        with pytest.raises(Exception):
-            self.worker.run()
+        self.worker.run()
 
         assert mc_do_job.called
         assert self.worker.init_fedmsg.called

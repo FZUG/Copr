@@ -3,9 +3,9 @@ from __future__ import with_statement
 import os
 import flask
 
-from flask.ext.sqlalchemy import SQLAlchemy
-from flask.ext.openid import OpenID
-from flask.ext.whooshee import Whooshee
+from flask_sqlalchemy import SQLAlchemy
+from flask_openid import OpenID
+from flask_whooshee import Whooshee
 
 app = flask.Flask(__name__)
 
@@ -25,10 +25,15 @@ oid = OpenID(app, app.config["OPENID_STORE"], safe_roots=[])
 db = SQLAlchemy(app)
 whooshee = Whooshee(app)
 
+
 import coprs.filters
 import coprs.log
+from coprs.log import setup_log
 import coprs.models
 import coprs.whoosheers
+
+from coprs.helpers import RedisConnectionProvider
+rcp = RedisConnectionProvider(config=app.config)
 
 from coprs.views import admin_ns
 from coprs.views.admin_ns import admin_general
@@ -45,8 +50,11 @@ from coprs.views import status_ns
 from coprs.views.status_ns import status_general
 from coprs.views import recent_ns
 from coprs.views.recent_ns import recent_general
+from coprs.views.stats_ns import stats_receiver
 
 from .context_processors import include_banner
+
+setup_log()
 
 app.register_blueprint(api_ns.api_ns)
 app.register_blueprint(admin_ns.admin_ns)
@@ -55,5 +63,6 @@ app.register_blueprint(misc.misc)
 app.register_blueprint(backend_ns.backend_ns)
 app.register_blueprint(status_ns.status_ns)
 app.register_blueprint(recent_ns.recent_ns)
+app.register_blueprint(stats_receiver.stats_rcv_ns)
 
 app.add_url_rule("/", "coprs_ns.coprs_show", coprs_general.coprs_show)
