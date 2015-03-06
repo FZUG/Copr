@@ -2,19 +2,22 @@
 %global _pkgdocdir %{_docdir}/%{name}-%{version}
 %endif
 
+# optional rpm packages
+%global with_optional  0
+
 Name:       copr-backend
 Version:    1.58
-Release:    1%{?dist}
+Release:    2%{?dist}
 Summary:    Backend for Copr
 
 Group:      Applications/Productivity
 License:    GPLv2+
-URL:        https://fedorahosted.org/copr/
+URL:        https://fedorahosted.org/copr
 # Source is created by
 # git clone https://git.fedorahosted.org/git/copr.git
 # cd copr/backend
 # tito build --tgz
-Source0: %{name}-%{version}.tar.gz
+Source0:    https://git.fedorahosted.org/cgit/copr.git/snapshot/%{name}-%{version}-1.tar.xz
 
 BuildArch:  noarch
 BuildRequires: asciidoc
@@ -50,7 +53,6 @@ BuildRequires: wget
 
 Requires:   obs-signd
 Requires:   ansible >= 1.2
-Requires:   lighttpd
 Requires:   euca2ools
 Requires:   rsync
 Requires:   openssh-clients
@@ -72,7 +74,10 @@ Requires:   fedmsg
 Requires:   gawk
 Requires:   crontabs
 Requires:   python-paramiko
+%if %{?with_optional}
+Requires:   lighttpd
 Requires:   logstash
+%endif
 
 Requires(post): systemd
 Requires(preun): systemd
@@ -95,17 +100,18 @@ This package include documentation for COPR code. Mostly useful for developers
 only.
 
 %prep
-%setup -q
+%setup -q -n %{name}-%{version}-1
 
 
 %build
 # build documentation
-pushd documentation
+pushd backend/documentation
 make %{?_smp_mflags} python
 popd
 
 %install
 
+pushd backend
 install -d %{buildroot}%{_sharedstatedir}/copr
 install -d %{buildroot}%{_sharedstatedir}/copr/jobs
 install -d %{buildroot}%{_sharedstatedir}/copr/public_html/results
@@ -146,32 +152,38 @@ touch %{buildroot}%{_var}/run/copr-backend/copr-be.pid
 install -m 0644 copr-backend.service %{buildroot}/%{_unitdir}/
 install -m 0644 conf/copr.sudoers.d %{buildroot}%{_sysconfdir}/sudoers.d/copr
 
-
+%if %{?with_optional}
 install -d %{buildroot}%{_sysconfdir}/logstash.d
 cp -a conf/logstash/copr_backend.conf %{buildroot}%{_sysconfdir}/logstash.d/copr_backend.conf
 install -d %{buildroot}%{_datadir}/logstash/patterns/
 cp -a conf/logstash/lighttpd.pattern %{buildroot}%{_datadir}/logstash/patterns/lighttpd.pattern
-
+%endif
 
 #doc
 cp -a documentation/python-doc %{buildroot}%{_pkgdocdir}/
 cp -a conf/playbooks %{buildroot}%{_pkgdocdir}/
 
-%check
 
+%check
+pushd backend
 PYTHONPATH=backend:run:$PYTHONPATH python -B -m pytest \
   -s --cov-report term-missing --cov ./backend --cov ./run ./tests/
-
 
 %pre
 getent group copr >/dev/null || groupadd -r copr
 getent passwd copr >/dev/null || \
+%if %{?with_optional}
 useradd -r -g copr -G lighttpd -s /bin/bash -c "COPR user" copr
+%else
+useradd -r -g copr -G apache -s /bin/bash -c "COPR user" copr
+%endif
 /usr/bin/passwd -l copr >/dev/null
 
 %post
 %systemd_post copr-backend.service
+%if %{?with_optional}
 %systemd_post logstash.service
+%endif
 
 %preun
 %systemd_preun copr-backend.service
@@ -180,16 +192,16 @@ useradd -r -g copr -G lighttpd -s /bin/bash -c "COPR user" copr
 %systemd_postun_with_restart copr-backend.service
 
 %files
-%license LICENSE
+%license backend/LICENSE
 
 %{_datadir}/copr/*
 %dir %{_sharedstatedir}/copr
-%dir %attr(0755, copr, copr) %{_sharedstatedir}/copr/jobs/
-%dir %attr(0755, copr, copr) %{_sharedstatedir}/copr/public_html/
-%dir %attr(0755, copr, copr) %{_sharedstatedir}/copr/public_html/results
-%dir %attr(0755, copr, copr) %{_var}/log/copr
-%dir %attr(0755, copr, copr) %{_var}/log/copr/workers
-%dir %attr(0755, copr, copr) %{_var}/run/copr-backend
+%dir %attr(0755,copr,copr) %{_sharedstatedir}/copr/jobs/
+%dir %attr(0755,copr,copr) %{_sharedstatedir}/copr/public_html/
+%dir %attr(0755,copr,copr) %{_sharedstatedir}/copr/public_html/results
+%dir %attr(0755,copr,copr) %{_var}/log/copr
+%dir %attr(0755,copr,copr) %{_var}/log/copr/workers
+%dir %attr(0755,copr,copr) %{_var}/run/copr-backend
 
 %ghost %{_var}/log/copr/*.log
 %ghost %{_var}/log/copr/workers/worker-*.log
@@ -200,25 +212,29 @@ useradd -r -g copr -G lighttpd -s /bin/bash -c "COPR user" copr
 %doc %{_pkgdocdir}/lighttpd
 %doc %{_pkgdocdir}/playbooks
 %dir %{_sysconfdir}/copr
-%config(noreplace) %attr(0640, root, copr) %{_sysconfdir}/copr/copr-be.conf
+%config(noreplace) %attr(0640,root,copr) %{_sysconfdir}/copr/copr-be.conf
 %{_unitdir}/copr-backend.service
 %{_tmpfilesdir}/copr-backend.conf
 %{_bindir}/*
 
 %config(noreplace) %{_sysconfdir}/cron.daily/copr-backend
+%if %{?with_optional}
 %config(noreplace) %{_sysconfdir}/logstash.d/copr_backend.conf
 %{_datadir}/logstash/patterns/lighttpd.pattern
+%endif
 
-
-%config(noreplace) %attr(0600, root, root)  %{_sysconfdir}/sudoers.d/copr
+%config(noreplace) %attr(0600,root,root)  %{_sysconfdir}/sudoers.d/copr
 
 %files doc
-%license LICENSE
+%license backend/LICENSE
 %doc %{_pkgdocdir}/python-doc
 %exclude %{_pkgdocdir}/lighttpd
 %exclude %{_pkgdocdir}/playbooks
 
 %changelog
+* Fri Mar 06 2015 mosquito <sensor.wen@gmail.com> 1.58-2
+- Rebuild for copr.fdzh.org
+
 * Mon Mar 02 2015 Valentin Gologuzov <vgologuz@redhat.com> 1.58-1
 - [rhbz:#1185959] - RFE: Present statistics about project
   popularity. A few more counters for downloads from backend's result
