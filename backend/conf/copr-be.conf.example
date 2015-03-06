@@ -63,9 +63,6 @@ destdir=/var/lib/copr/public_html/results
 # default is 10
 sleeptime=30
 
-# default is 8
-num_workers=5
-
 # path to log file
 # default is /var/log/copr/backend.log
 logfile=/var/log/copr/backend.log
@@ -92,8 +89,6 @@ worker_logdir=/var/log/copr/workers/
 
 # minimum age for builds to be pruned
 prune_days=14
-# path to executable script to clean old build
-prune_script=/usr/share/copr/copr_prune_old_builds.sh
 
 # Spawn builder in advance, before we get task?
 # It save time, but consume resources even when

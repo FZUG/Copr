@@ -5,7 +5,7 @@
 %endif
 
 Name:       copr-frontend
-Version:    1.51
+Version:    1.55
 Release:    1%{?dist}
 Summary:    Frontend for Copr
 
@@ -51,12 +51,17 @@ Requires:   python-pylibravatar
 Requires:   python-whoosh >= 2.5.3
 Requires:   pytz
 Requires:   python-six
+Requires:   python-netaddr
 # for tests:
 Requires:   pytest
 Requires:   python-flexmock
 Requires:   python-mock
 Requires:   python-decorator
 Requires:   yum
+Requires:   logstash
+Requires:   redis
+Requires:   python-redis
+Requires:   python-dateutil
 %if 0%{?rhel} < 7 && 0%{?rhel} > 0
 BuildRequires: python-argparse
 %endif
@@ -69,6 +74,9 @@ BuildRequires: python-flask-openid
 BuildRequires: python-flask-whooshee
 BuildRequires: python-pylibravatar
 BuildRequires: python-flask-wtf
+BuildRequires: python-netaddr
+BuildRequires: python-redis
+BuildRequires: python-dateutil
 BuildRequires: pytest
 BuildRequires: yum
 BuildRequires: python-flexmock
@@ -119,12 +127,19 @@ install -d %{buildroot}%{_sharedstatedir}/copr/data/whooshee/copr_user_whoosheer
 
 
 cp -a coprs_frontend/* %{buildroot}%{_datadir}/copr/coprs_frontend
-sed -i "s/__RPM_BUILD_VERSION/%{version}/" %{buildroot}%{_datadir}/copr/coprs_frontend/coprs/templates/layout.html
+sed -i "s/__RPM_BUILD_VERSION/%{version}-%{release}/" %{buildroot}%{_datadir}/copr/coprs_frontend/coprs/templates/layout.html
 
 mv %{buildroot}%{_datadir}/copr/coprs_frontend/coprs.conf.example ./
 mv %{buildroot}%{_datadir}/copr/coprs_frontend/config/* %{buildroot}%{_sysconfdir}/copr
 rm %{buildroot}%{_datadir}/copr/coprs_frontend/CONTRIBUTION_GUIDELINES
 touch %{buildroot}%{_sharedstatedir}/copr/data/copr.db
+
+install -d %{buildroot}%{_var}/log/copr
+install -d %{buildroot}%{_sysconfdir}/logrotate.d
+install -d %{buildroot}%{_sysconfdir}/logstash.d
+cp -a conf/logrotate %{buildroot}%{_sysconfdir}/logrotate.d/%{name}
+cp -a conf/logstash.conf %{buildroot}%{_sysconfdir}/logstash.d/copr_frontend.conf
+touch %{buildroot}%{_var}/log/copr/frontend.log
 
 %check
 %if %{with_test} && "%{_arch}" == "x86_64"
@@ -142,13 +157,18 @@ useradd -r -g copr-fe -G copr-fe -d %{_datadir}/copr/coprs_frontend -s /bin/bash
 
 %post
 service httpd condrestart
+service logstash condrestart
 
 %files
-%doc LICENSE coprs.conf.example
+%license LICENSE
+%doc coprs.conf.example
 %dir %{_datadir}/copr
 %dir %{_sysconfdir}/copr
 %dir %{_sharedstatedir}/copr
 %{_datadir}/copr/coprs_frontend
+
+%config(noreplace) %{_sysconfdir}/logrotate.d/%{name}
+%config(noreplace) %{_sysconfdir}/logstash.d/copr_frontend.conf
 
 %defattr(-, copr-fe, copr-fe, -)
 %dir %{_sharedstatedir}/copr/data
@@ -157,6 +177,10 @@ service httpd condrestart
 %dir %{_sharedstatedir}/copr/data/whooshee/copr_user_whoosheer
 
 %ghost %{_sharedstatedir}/copr/data/copr.db
+
+%defattr(644, copr-fe, copr-fe, 755)
+%dir %{_var}/log/copr
+%ghost %{_var}/log/copr/*.log
 
 %defattr(600, copr-fe, copr-fe, 700)
 %config(noreplace)  %{_sysconfdir}/copr/copr.conf
@@ -168,6 +192,41 @@ service httpd condrestart
 %doc documentation/python-doc
 
 %changelog
+* Mon Mar 02 2015 Valentin Gologuzov <vgologuz@redhat.com> 1.55-1
+- [frontend] fix tests to be runnable without redis-server.
+
+* Mon Mar 02 2015 Valentin Gologuzov <vgologuz@redhat.com> 1.54-1
+- [backend] [rhbz:#1091640] RFE: Release specific additional repos
+- [frontend][backend] [rhbz:#1119300]  [RFE] allow easy add copr repos in using
+  repository lis
+- [frontend] enabled `gpgcheck=1` in .repo template
+- [copr] monitor page redone: show version for each chroot
+- [frontend] [rhbz:#1160370, #1173165] sub-page on resubmit action, where user
+  could change preselected build chroots.
+- [frontend] added filelog for frontend
+- [frontend] Added "-%%{release}" to the build version on the copr pages.
+- mark license as license in spec
+- [rhbz:#1171796] copr sometimes doesn't delete build from repository
+- [backend] [rhbz:#1073333] Record consecutive builds fails to redis. Added
+  script to produce warnings for nagios check from failures recorded to redis.
+
+* Thu Feb 05 2015 Valentin Gologuzov <vgologuz@redhat.com> 1.53-1
+- [frontend] enabled `gpgcheck=1` in .repo template
+- [frontend] correct url for pubkey in .repo
+
+* Fri Jan 23 2015 Valentin Gologuzov <vgologuz@redhat.com> 1.52-1
+- add url to gpg pubkey in .repo files
+- [rhbz:#1183702]  Interrupted builds aren't re-added to the
+  builder queue, and stuck forever in RUNNING state.
+- [rhbz:#1133650] RFE: copr frontend on page of build details,
+  results section should show multiple links that link directly for every
+  chroot directory
+- UI to control `enable_net` option, DB schema changes
+- new command AddDebugUser for manage script
+- [RHBZ:#1176364] Wrong value for the build timeout.
+- [RHBZ:#1177179] Display the timezone with a format more similar to
+  ISO 8601
+
 * Mon Dec 15 2014 Valentin Gologuzov <vgologuz@redhat.com> 1.51-1
 - bugfix: send correct chroots in on_auto_createrepo_change()
 - control auto_createrepo property of project through API

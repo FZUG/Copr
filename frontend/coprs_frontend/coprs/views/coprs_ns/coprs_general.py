@@ -1,5 +1,6 @@
 import time
 import re
+import urlparse
 
 import flask
 from flask import render_template
@@ -11,17 +12,20 @@ from itertools import groupby
 
 from coprs import app
 from coprs import db
+from coprs import rcp
 from coprs import exceptions
 from coprs import forms
 from coprs import helpers
 from coprs import models
+from coprs.logic.stat_logic import CounterStatLogic
+from coprs.rmodels import TimedStatEvents
 
 from coprs.views.misc import login_required, page_not_found
 
 from coprs.views.coprs_ns import coprs_ns
 
 from coprs.logic import builds_logic, coprs_logic, actions_logic
-from coprs.helpers import parse_package_name, generate_repo_url
+from coprs.helpers import parse_package_name, generate_repo_url, CHROOT_RPMS_DL_STAT_FMT, CHROOT_REPO_MD_DL_STAT_FMT
 
 
 @coprs_ns.route("/", defaults={"page": 1})
@@ -183,9 +187,43 @@ def copr_detail(username, coprname):
         return page_not_found(
             "Copr with name {0} does not exist.".format(coprname))
 
+    repo_dl_stat = CounterStatLogic.get_copr_repo_dl_stat(copr)
+
+    repos_info = {}
+    for chroot in copr.active_chroots:
+        chroot_rpms_dl_stat_key = CHROOT_REPO_MD_DL_STAT_FMT.format(
+            copr_user=copr.owner.name,
+            copr_project_name=copr.name,
+            copr_chroot=chroot.name,
+        )
+        chroot_rpms_dl_stat = TimedStatEvents.get_count(
+            rconnect=rcp.get_connection(),
+            name=chroot_rpms_dl_stat_key,
+        )
+
+        if chroot.name_release not in repos_info:
+            repos_info[chroot.name_release] = {
+                "name_release": chroot.name_release,
+                "name_release_human": chroot.name_release_human,
+                "arch_list": [chroot.arch],
+                "repo_file": "{}-{}-{}.repo".format(copr.owner.name, copr.name, chroot.name_release),
+                "dl_stat": repo_dl_stat[chroot.name_release],
+                "rpm_dl_stat": {
+                    chroot.arch: chroot_rpms_dl_stat
+                }
+            }
+        else:
+            repos_info[chroot.name_release]["arch_list"].append(chroot.arch)
+            repos_info[chroot.name_release]["rpm_dl_stat"][chroot.arch] = chroot_rpms_dl_stat
+
+    repos_info_list = sorted(repos_info.values(), key=lambda rec: rec["name_release"])
+
     return flask.render_template("coprs/detail/overview.html",
                                  copr=copr,
-                                 form=form)
+                                 form=form,
+                                 repo_dl_stat=repo_dl_stat,
+                                 repos_info_list=repos_info_list,
+                                 )
 
 
 @coprs_ns.route("/<username>/<coprname>/permissions/")
@@ -258,6 +296,8 @@ def copr_update(username, coprname):
         copr.description = form.description.data
         copr.instructions = form.instructions.data
         copr.disable_createrepo = form.disable_createrepo.data
+        copr.build_enable_net = form.build_enable_net.data
+
         coprs_logic.CoprChrootsLogic.update_from_names(
             flask.g.user, copr, form.selected_chroots)
 
@@ -502,9 +542,9 @@ def copr_legal_flag(username, coprname):
                                         coprname=coprname))
 
 
-@coprs_ns.route("/<username>/<coprname>/repo/<chroot>/", defaults={"repofile": None})
-@coprs_ns.route("/<username>/<coprname>/repo/<chroot>/<repofile>")
-def generate_repo_file(username, coprname, chroot, repofile):
+@coprs_ns.route("/<username>/<coprname>/repo/<name_release>/", defaults={"repofile": None})
+@coprs_ns.route("/<username>/<coprname>/repo/<name_release>/<repofile>")
+def generate_repo_file(username, coprname, name_release, repofile):
     """ Generate repo file for a given repo name.
         Reponame = username-coprname """
     # This solution is used because flask splits off the last part after a
@@ -513,7 +553,7 @@ def generate_repo_file(username, coprname, chroot, repofile):
 
     reponame = "{0}-{1}".format(username, coprname)
 
-    if repofile is not None and repofile != username + '-' + coprname + '-' + chroot + '.repo':
+    if repofile is not None and repofile != username + '-' + coprname + '-' + name_release + '.repo':
         return page_not_found(
             "Repository filename does not match expected: {0}"
             .format(repofile))
@@ -527,9 +567,9 @@ def generate_repo_file(username, coprname, chroot, repofile):
         return page_not_found(
             "Project {0}/{1} does not exist".format(username, coprname))
 
-    mock_chroot = coprs_logic.MockChrootsLogic.get_from_name(chroot, noarch=True).first()
+    mock_chroot = coprs_logic.MockChrootsLogic.get_from_name(name_release, noarch=True).first()
     if not mock_chroot:
-        return page_not_found("Chroot {0} does not exist".format(chroot))
+        return page_not_found("Chroot {0} does not exist".format(name_release))
 
     url = ""
     for build in copr.builds:
@@ -543,8 +583,9 @@ def generate_repo_file(username, coprname, chroot, repofile):
             .format(username, coprname))
 
     repo_url = generate_repo_url(mock_chroot, url)
+    pubkey_url = urlparse.urljoin(url, "pubkey.gpg")
     response = flask.make_response(
-        flask.render_template("coprs/copr.repo", copr=copr, url=repo_url))
+        flask.render_template("coprs/copr.repo", copr=copr, url=repo_url, pubkey_url=pubkey_url))
 
     response.mimetype = "text/plain"
     response.headers["Content-Disposition"] = \

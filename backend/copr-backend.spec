@@ -3,7 +3,7 @@
 %endif
 
 Name:       copr-backend
-Version:    1.54
+Version:    1.58
 Release:    1%{?dist}
 Summary:    Backend for Copr
 
@@ -45,6 +45,8 @@ BuildRequires: python-copr
 BuildRequires: python-six
 BuildRequires: ansible >= 1.2
 BuildRequires: python-IPy
+BuildRequires: python-paramiko
+BuildRequires: wget
 
 Requires:   obs-signd
 Requires:   ansible >= 1.2
@@ -69,6 +71,8 @@ Requires:   logrotate
 Requires:   fedmsg
 Requires:   gawk
 Requires:   crontabs
+Requires:   python-paramiko
+Requires:   logstash
 
 Requires(post): systemd
 Requires(preun): systemd
@@ -142,6 +146,13 @@ touch %{buildroot}%{_var}/run/copr-backend/copr-be.pid
 install -m 0644 copr-backend.service %{buildroot}/%{_unitdir}/
 install -m 0644 conf/copr.sudoers.d %{buildroot}%{_sysconfdir}/sudoers.d/copr
 
+
+install -d %{buildroot}%{_sysconfdir}/logstash.d
+cp -a conf/logstash/copr_backend.conf %{buildroot}%{_sysconfdir}/logstash.d/copr_backend.conf
+install -d %{buildroot}%{_datadir}/logstash/patterns/
+cp -a conf/logstash/lighttpd.pattern %{buildroot}%{_datadir}/logstash/patterns/lighttpd.pattern
+
+
 #doc
 cp -a documentation/python-doc %{buildroot}%{_pkgdocdir}/
 cp -a conf/playbooks %{buildroot}%{_pkgdocdir}/
@@ -160,6 +171,7 @@ useradd -r -g copr -G lighttpd -s /bin/bash -c "COPR user" copr
 
 %post
 %systemd_post copr-backend.service
+%systemd_post logstash.service
 
 %preun
 %systemd_preun copr-backend.service
@@ -168,7 +180,7 @@ useradd -r -g copr -G lighttpd -s /bin/bash -c "COPR user" copr
 %systemd_postun_with_restart copr-backend.service
 
 %files
-%doc LICENSE
+%license LICENSE
 
 %{_datadir}/copr/*
 %dir %{_sharedstatedir}/copr
@@ -191,19 +203,72 @@ useradd -r -g copr -G lighttpd -s /bin/bash -c "COPR user" copr
 %config(noreplace) %attr(0640, root, copr) %{_sysconfdir}/copr/copr-be.conf
 %{_unitdir}/copr-backend.service
 %{_tmpfilesdir}/copr-backend.conf
-%{_bindir}/
+%{_bindir}/*
 
 %config(noreplace) %{_sysconfdir}/cron.daily/copr-backend
+%config(noreplace) %{_sysconfdir}/logstash.d/copr_backend.conf
+%{_datadir}/logstash/patterns/lighttpd.pattern
+
 
 %config(noreplace) %attr(0600, root, root)  %{_sysconfdir}/sudoers.d/copr
 
 %files doc
-%doc LICENSE
+%license LICENSE
 %doc %{_pkgdocdir}/python-doc
 %exclude %{_pkgdocdir}/lighttpd
 %exclude %{_pkgdocdir}/playbooks
 
 %changelog
+* Mon Mar 02 2015 Valentin Gologuzov <vgologuz@redhat.com> 1.58-1
+- [rhbz:#1185959] - RFE: Present statistics about project
+  popularity. A few more counters for downloads from backend's result
+  directory.
+- [backend] [rhbz:#1191037] RFE: Include package name and version in fedmsg
+  notification
+- [rhbz:#1091640] RFE: Release specific additional repos
+- [rhbz:#1119300]  [RFE] allow easy add copr repos in using
+  repository lis
+- [backend][frontend] removing code related to multiply source rpms in build.
+  Build.pkgs now expected to have exactly one src.rpm.
+- [copr] backend: script fixes, dropped create_repo cli script
+- more file descriptors on builder
+- [rhbz:#1171796] copr sometimes doesn't delete build from repository
+- [rhbz:#1073333] Record consecutive builds fails to redis. Added
+  script to produce warnings for nagios check from failures recorded to redis.
+- correctly print job representation
+
+* Fri Jan 23 2015 Valentin Gologuzov <vgologuz@redhat.com> 1.57-1
+- call correct Worker method on backend termination
+- put gpg pubkey to the project results root dir (one level up from
+  the chroot dir)
+- don't kill Worker from errors during job build
+- [rhbz:#1169782] RFE - Show package "version-release" instead of
+  just "version"
+- [rhbz:#1117446] add a build id tagfile into the package directory
+- Updated unittests to reflect latest changes.
+- builder: use only one log file for rsync per build
+- dispatcher: run terminate_instance safely
+- cleanup example config
+- cleanup mockremote.builder
+- Builder.download don't use Popen+PIPE.communicate with rsync,
+  output redirected to the files.
+- disable networking only when required; python style exception
+  handling in mockremote*; removed run/copr_mockremote
+- test build with disabled networking
+- simplified  mockremote.builder.Builder.check_for_ans_error; new
+  method mockremote.builder.Builder.run_ansible_with_check
+- daemons.dispatched.Worker: don't fail when wrong group_id was
+  provided
+- add vm_ip to worker process title (rhbz: 1182637)
+
+* Wed Jan 14 2015 Valentin Gologuzov <vgologuz@redhat.com> 1.56-1
+- [backend] [.spec] fix %files section
+
+* Wed Jan 14 2015 Valentin Gologuzov <vgologuz@redhat.com> 1.55-1
+- [backend] [bugfix] set pythonpath in systemd unit to run /usr/bin/copr_be.py
+- [backend] [RHBZ:#1182106] JobGrabber dies when action raises an exception.
+- [backend] Moved scripts into /usr/bin/ Renamed copr{-,_}be.py.
+
 * Wed Jan 07 2015 Miroslav Suchý <msuchy@redhat.com> 1.54-1
 - 1179713 - workaround for 1179806
 - run script unbufferred otherwise log is written after full block

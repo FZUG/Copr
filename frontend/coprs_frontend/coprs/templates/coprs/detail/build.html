@@ -49,7 +49,12 @@
             <dt> Chroots:</dt>
                 {% for chroot in build.build_chroots %} <tr>
                     <dd>
-                        {{ chroot.name }}: 
+                        {% if build.results %}
+                          <a href="{{ build.results }}/{{ chroot.name }}/{{ build.src_pkg_name }}">{{ chroot.name }}</a>
+                        {% else %}
+                          {{ chroot.name }}
+                        {% endif %}
+                        :
                         <span class="build-{{chroot.state}}" 
                               alt="{{chroot.state|build_state_description}}">
                             {{ chroot.state }}
@@ -93,14 +98,17 @@
                 <dd>
                     {{ build.started_on|time_ago(build.ended_on) }}
                 </dd>
+
+            <dt class="oneline"> Networking enabled: </dt>
+                <dd>
+                    {{ build.enable_net }}
+                </dd>
         </div>
         <div>
             <dt> Source: </dt>
                 <dd>
                     {% if build.pkgs is not none %}
-                        {% for pkg in build.pkgs.split() %}
-                            <dd> <a href="{{ pkg }}">{{ pkg }}</a></dd>
-                        {% endfor %}
+                        <dd> <a href="{{ pkg }}">{{ build.pkgs }}</a></dd>
                     {% endif %}
                 </dd>
         </div>

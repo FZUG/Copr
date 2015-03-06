@@ -1,2 +1,2 @@
 # Copr
-中文版Copr
+中文版 Copr

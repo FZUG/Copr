@@ -150,13 +150,17 @@ getent passwd copr-signer >/dev/null || \
 
 
 %post
+semanage fcontext -a -t httpd_log_t '/var/log/copr-keygen(/.*)?'
+restorecon -rv /var/log/copr-keygen/
+
 service httpd condrestart
 
 %postun
 service httpd condrestart
 
 %files
-%doc LICENSE docs/INSTALL.rst docs/README.rst
+%license LICENSE
+%doc docs/INSTALL.rst docs/README.rst
 %doc configs/local_settings.py.example
 
 %{_datadir}/copr-keygen/*

@@ -11,12 +11,14 @@ import multiprocessing
 import ansible
 import ansible.runner
 import ansible.utils
-from ansible import callbacks
+
 from ansible.errors import AnsibleError
 
 from setproctitle import setproctitle
 from IPy import IP
 from retask.queue import Queue
+
+
 
 from ..mockremote.callback import CliLogCallBack
 
@@ -26,6 +28,7 @@ from ..job import BuildJob
 from ..mockremote import MockRemote
 from ..frontend import FrontendClient
 from ..constants import BuildStatus
+from ..helpers import register_build_result
 
 ansible_playbook = "ansible-playbook"
 
@@ -111,7 +114,7 @@ class Worker(multiprocessing.Process):
         self.callback = callback
         if not self.callback:
             log_name = "worker-{0}-{1}.log".format(
-                self.opts.build_groups[self.group_id]["name"],
+                self.group_name,
                 self.worker_num)
 
             self.logfile = os.path.join(self.opts.worker_logdir, log_name)
@@ -120,6 +123,15 @@ class Worker(multiprocessing.Process):
         self.vm_name = None
         self.vm_ip = None
         self.callback.log("creating worker: dynamic ip")
+
+    @property
+    def group_name(self):
+        try:
+            return self.opts.build_groups[self.group_id]["name"]
+        except Exception as error:
+            self.callback.log("Failed to get builder group name from config, using group_id as name."
+                              "Original error: {}".format(error))
+            return self.group_id
 
     def event(self, topic, template, content=None):
         """ Multi-purpose logging method.
@@ -158,18 +170,18 @@ class Worker(multiprocessing.Process):
         self.mark_started(job)
 
         template = "build start: user:{user} copr:{copr}" \
-            " build:{build} ip:{ip}  pid:{pid}"
+            "pkg: {pkg} build:{build} ip:{ip}  pid:{pid}"
 
         content = dict(user=job.submitter, copr=job.project_name,
-                       owner=job.project_owner,
+                       owner=job.project_owner, pkg=job.pkg_name,
                        build=job.build_id, ip=self.vm_ip, pid=self.pid)
         self.event("build.start", template, content)
 
         template = "chroot start: chroot:{chroot} user:{user}" \
-            "copr:{copr} build:{build} ip:{ip}  pid:{pid}"
+            "copr:{copr} pkg: {pkg} build:{build} ip:{ip}  pid:{pid}"
 
         content = dict(chroot=job.chroot, user=job.submitter,
-                       owner=job.project_owner,
+                       owner=job.project_owner, pkg=job.pkg_name,
                        copr=job.project_name, build=job.build_id,
                        ip=self.vm_ip, pid=self.pid)
 
@@ -184,10 +196,11 @@ class Worker(multiprocessing.Process):
         self.return_results(job)
         self.callback.log("worker finished build: {0}".format(self.vm_ip))
         template = "build end: user:{user} copr:{copr} build:{build}" \
-            " ip:{ip}  pid:{pid} status:{status}"
+            "  pkg: {pkg}  version: {version} ip:{ip}  pid:{pid} status:{status}"
 
         content = dict(user=job.submitter, copr=job.project_name,
                        owner=job.project_owner,
+                       pkg=job.pkg_name, version=job.pkg_version,
                        build=job.build_id, ip=self.vm_ip, pid=self.pid,
                        status=job.status, chroot=job.chroot)
         self.event("build.end", template, content)
@@ -324,6 +337,7 @@ class Worker(multiprocessing.Process):
                 self.callback.log("Spawning a builder. Try No. {0}".format(i))
 
                 self.vm_ip = self.try_spawn(spawn_args)
+                self.update_process_title()
                 try:
                     self.validate_vm()
                 except CoprWorkerSpawnFailError:
@@ -334,14 +348,14 @@ class Worker(multiprocessing.Process):
                                   .format(time.time() - start))
 
             except CoprWorkerSpawnFailError as exception:
-                self.callback.log("VM Spawn attemp failed with message: {}"
+                self.callback.log("VM Spawn attempt failed with message: {}"
                                   .format(exception.msg))
 
     def terminate_instance(self):
         """
         Call the terminate playbook to destroy the building instance
         """
-
+        self.update_process_title(suffix="Terminating VM")
         term_args = {}
         if "ip" in self.opts.terminate_vars:
             term_args["ip"] = self.vm_ip
@@ -356,13 +370,22 @@ class Worker(multiprocessing.Process):
                 .format(self.group_id))
             sys.exit(255)
 
-        args = "-c ssh -i '{0},' {1} {2}".format(
-            self.vm_ip, playbook,
+        # args = "-c ssh -i '{0},' {1} {2}".format(
+        args = "-c ssh {} {}".format(
+            # self.vm_ip,
+            playbook,
             ans_extra_vars_encode(term_args, "copr_task"))
-        self.run_ansible_playbook(args, "terminate instance")
+
+        try:
+            self.run_ansible_playbook(args, "terminate instance")
+        except Exception as error:
+            self.callback.log("Failed to terminate an instance: vm_name={}, vm_ip={}. Original error: {}"
+                              .format(self.vm_name, self.vm_ip, error))
+
         # TODO: should we check that machine was destroyed?
         self.vm_ip = None
         self.vm_name = None
+        self.update_process_title()
 
     def mark_started(self, job):
         """
@@ -442,6 +465,7 @@ class Worker(multiprocessing.Process):
             - :py:class:`~backend.exceptions.CoprWorkerError`: spawn function doesn't return ip
             - :py:class:`AnsibleError`: failure during anible command execution
         """
+        self.update_process_title(suffix="Spawning a new VM")
         try:
             self.spawn_instance()
             if not self.vm_ip:
@@ -449,6 +473,8 @@ class Worker(multiprocessing.Process):
                 raise CoprWorkerError(
                     "No IP found from creating instance")
         except AnsibleError as e:
+            register_build_result(self.opts, failed=True)
+
             self.callback.log("failure to setup instance: {0}".format(e))
             raise
 
@@ -482,9 +508,7 @@ class Worker(multiprocessing.Process):
         Retrieves new build task from queue.
         Checks if the new job can be started and not skipped.
         """
-        setproctitle("worker-{0} {1}  No task".format(
-            self.opts.build_groups[self.group_id]["name"],
-            self.worker_num))
+        self.update_process_title(suffix="No task")
 
         # this sometimes caused TypeError in random worker
         # when another one  picekd up a task to build
@@ -499,10 +523,7 @@ class Worker(multiprocessing.Process):
         # import ipdb; ipdb.set_trace()
         job = BuildJob(task.data, self.opts)
 
-        setproctitle("worker-{0} {1}  Task: {2}".format(
-            self.opts.build_groups[self.group_id]["name"],
-            self.worker_num, job.build_id
-        ))
+        self.update_process_title(suffix="Task: {} chroot: {}".format(job.build_id, job.chroot))
 
         # Checking whether the build is not cancelled
         if not self.starting_build(job):
@@ -577,16 +598,21 @@ class Worker(multiprocessing.Process):
                     macros=macros, opts=self.opts, lock=self.lock,
                     callback=CliLogCallBack(quiet=True, logfn=chroot_logfile),
                 )
+                mr.check()
+
                 build_details = mr.build_pkg()
                 job.update(build_details)
 
                 if self.opts.do_sign:
                     mr.add_pubkey()
 
+                register_build_result(self.opts)
+
             except MockRemoteError as e:
                 # record and break
                 self.callback.log("{0} - {1}".format(self.vm_ip, e))
                 status = BuildStatus.FAILURE
+                register_build_result(self.opts, failed=True)
 
             self.callback.log(
                 "Finished build: id={0} builder={1} timeout={2} destdir={3}"
@@ -596,6 +622,8 @@ class Worker(multiprocessing.Process):
 
         job.status = status
         self._announce_end(job)
+        self.update_process_title(suffix="Task: {} chroot: {} done"
+                                  .format(job.build_id, job.chroot))
 
     def check_vm_still_alive(self):
         """
@@ -609,6 +637,17 @@ class Worker(multiprocessing.Process):
             except CoprWorkerSpawnFailError:
                 self.terminate_instance()
 
+    def update_process_title(self, suffix=None):
+        title = "worker-{} {} ".format(self.group_name, self.worker_num)
+        if self.vm_ip:
+            title += "VM_IP={} ".format(self.vm_ip)
+        if self.vm_name:
+            title += "VM_NAME={} ".format(self.vm_name)
+        if suffix:
+            title += str(suffix)
+
+        setproctitle(title)
+
     def run(self):
         """
         Worker should startup and check if it can function
@@ -621,6 +660,7 @@ class Worker(multiprocessing.Process):
         self.init_fedmsg()
 
         while not self.kill_received:
+            self.update_process_title()
             self.check_vm_still_alive()
 
             if self.opts.spawn_in_advance and not self.vm_ip:
@@ -636,6 +676,8 @@ class Worker(multiprocessing.Process):
 
             try:
                 self.do_job(job)
+            except Exception as error:
+                self.callback.log("Unhandled build error: {}".format(error))
             finally:
                 # clean up the instance
                 self.terminate_instance()
