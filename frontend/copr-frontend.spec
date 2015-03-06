@@ -4,19 +4,22 @@
 %global __python2 %{__python}
 %endif
 
+# optional rpm packages
+%global with_optional  0
+
 Name:       copr-frontend
 Version:    1.55
-Release:    1%{?dist}
+Release:    2%{?dist}
 Summary:    Frontend for Copr
 
 Group:      Applications/Productivity
 License:    GPLv2+
-URL:        https://fedorahosted.org/copr/
+URL:        https://fedorahosted.org/copr
 # Source is created by
 # git clone https://git.fedorahosted.org/git/copr.git
 # cd copr/frontend
 # tito build --tgz
-Source0: %{name}-%{version}.tar.gz
+Source0:    https://git.fedorahosted.org/cgit/copr.git/snapshot/%{name}-%{version}-1.tar.xz
 
 BuildArch:  noarch
 BuildRequires: asciidoc
@@ -58,7 +61,9 @@ Requires:   python-flexmock
 Requires:   python-mock
 Requires:   python-decorator
 Requires:   yum
+%if %{?with_optional}
 Requires:   logstash
+%endif
 Requires:   redis
 Requires:   python-redis
 Requires:   python-dateutil
@@ -83,6 +88,7 @@ BuildRequires: python-flexmock
 BuildRequires: python-mock
 BuildRequires: python-decorator
 BuildRequires: python-markdown
+BuildRequires: python-alembic
 BuildRequires: pytz
 
 %description
@@ -103,19 +109,18 @@ This package include documentation for COPR code. Mostly useful for developers
 only.
 
 %prep
-%setup -q
+%setup -q -n %{name}-%{version}-1
 
 
 %build
 # build documentation
-pushd documentation
+pushd frontend/documentation
 make %{?_smp_mflags} python
 popd
 
 %install
 
-
-
+pushd frontend
 install -d %{buildroot}%{_sysconfdir}/copr
 install -d %{buildroot}%{_datadir}/copr/coprs_frontend
 install -d %{buildroot}%{_sharedstatedir}/copr/data/openid_store
@@ -125,25 +130,26 @@ install -d %{buildroot}%{_sharedstatedir}/copr/data/openid_store/temp
 install -d %{buildroot}%{_sharedstatedir}/copr/data/whooshee
 install -d %{buildroot}%{_sharedstatedir}/copr/data/whooshee/copr_user_whoosheer
 
-
 cp -a coprs_frontend/* %{buildroot}%{_datadir}/copr/coprs_frontend
 sed -i "s/__RPM_BUILD_VERSION/%{version}-%{release}/" %{buildroot}%{_datadir}/copr/coprs_frontend/coprs/templates/layout.html
 
-mv %{buildroot}%{_datadir}/copr/coprs_frontend/coprs.conf.example ./
+mv %{buildroot}%{_datadir}/copr/coprs_frontend/coprs.conf.example ../
 mv %{buildroot}%{_datadir}/copr/coprs_frontend/config/* %{buildroot}%{_sysconfdir}/copr
 rm %{buildroot}%{_datadir}/copr/coprs_frontend/CONTRIBUTION_GUIDELINES
 touch %{buildroot}%{_sharedstatedir}/copr/data/copr.db
 
 install -d %{buildroot}%{_var}/log/copr
 install -d %{buildroot}%{_sysconfdir}/logrotate.d
+%if %{?with_optional}
 install -d %{buildroot}%{_sysconfdir}/logstash.d
-cp -a conf/logrotate %{buildroot}%{_sysconfdir}/logrotate.d/%{name}
 cp -a conf/logstash.conf %{buildroot}%{_sysconfdir}/logstash.d/copr_frontend.conf
+%endif
+cp -a conf/logrotate %{buildroot}%{_sysconfdir}/logrotate.d/%{name}
 touch %{buildroot}%{_var}/log/copr/frontend.log
 
 %check
 %if %{with_test} && "%{_arch}" == "x86_64"
-    pushd coprs_frontend
+    pushd frontend/coprs_frontend
     rm -rf /tmp/copr.db /tmp/whooshee || :
     COPR_CONFIG="$(pwd)/config/copr_unit_test.conf" ./manage.py test
     popd
@@ -157,10 +163,12 @@ useradd -r -g copr-fe -G copr-fe -d %{_datadir}/copr/coprs_frontend -s /bin/bash
 
 %post
 service httpd condrestart
+%if %{?with_optional}
 service logstash condrestart
+%endif
 
 %files
-%license LICENSE
+%license frontend/LICENSE
 %doc coprs.conf.example
 %dir %{_datadir}/copr
 %dir %{_sysconfdir}/copr
@@ -168,9 +176,11 @@ service logstash condrestart
 %{_datadir}/copr/coprs_frontend
 
 %config(noreplace) %{_sysconfdir}/logrotate.d/%{name}
+%if %{?with_optional}
 %config(noreplace) %{_sysconfdir}/logstash.d/copr_frontend.conf
+%endif
 
-%defattr(-, copr-fe, copr-fe, -)
+%defattr(-,copr-fe,copr-fe,-)
 %dir %{_sharedstatedir}/copr/data
 %dir %{_sharedstatedir}/copr/data/openid_store
 %dir %{_sharedstatedir}/copr/data/whooshee
@@ -178,20 +188,23 @@ service logstash condrestart
 
 %ghost %{_sharedstatedir}/copr/data/copr.db
 
-%defattr(644, copr-fe, copr-fe, 755)
+%defattr(644,copr-fe,copr-fe,755)
 %dir %{_var}/log/copr
 %ghost %{_var}/log/copr/*.log
 
-%defattr(600, copr-fe, copr-fe, 700)
+%defattr(600,copr-fe,copr-fe,700)
 %config(noreplace)  %{_sysconfdir}/copr/copr.conf
 %config(noreplace)  %{_sysconfdir}/copr/copr_devel.conf
 %config(noreplace)  %{_sysconfdir}/copr/copr_unit_test.conf
 
 %files doc
-%license LICENSE
-%doc documentation/python-doc
+%license frontend/LICENSE
+%doc frontend/documentation/python-doc
 
 %changelog
+* Fri Mar 06 2015 mosquito <sensor.wen@gmail.com> 1.55-2
+- Rebuild for copr.fdzh.org
+
 * Mon Mar 02 2015 Valentin Gologuzov <vgologuz@redhat.com> 1.55-1
 - [frontend] fix tests to be runnable without redis-server.
 
