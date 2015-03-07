@@ -1,17 +1,17 @@
-Copr: a lightweight buildsystem [![Issues](https://img.shields.io/github/issues/FZUG/Copr.svg)](https://github.com/FZUG/Copr/issues)
-===============================
+Copr: a lightweight build system [![Issues](https://img.shields.io/github/issues/FZUG/Copr.svg)](https://github.com/FZUG/Copr/issues)
+-
 
 Fedora 中文社区 [Copr 编译服务](https://copr.fdzh.org) 
 
 
 使用指南
---------
+-
 
 详见 [Wiki](https://github.com/FZUG/Copr/wiki)
 
 
 提交问题
---------
+-
 
 * [新建一个 issue](https://github.com/fdzh/Copr/issues/new)；
 * 查找一些额外的资料如[设计文档](https://github.com/fdzh/Copr)和[历史](https://github.com/fdzh/Copr/issues)，确定这是一个新问题，然后给出详细的 bug 重现步骤；(必填）
