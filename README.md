@@ -1,5 +1,6 @@
-Copr: a lightweight build system [![Issues](https://img.shields.io/github/issues/FZUG/Copr.svg)](https://github.com/FZUG/Copr/issues)
+Copr [![Issues](https://img.shields.io/github/issues/FZUG/Copr.svg)](https://github.com/FZUG/Copr/issues)
 -
+（读作 /kä'pər/，意为 Cool Other Package Repositories ）
 
 Fedora 中文社区 [Copr 编译服务](https://copr.fdzh.org) 
 
