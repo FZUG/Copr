@@ -2,7 +2,7 @@ Copr [![Issues](https://img.shields.io/github/issues/FZUG/Copr.svg)](https://git
 -
 （读作 /kä'pər/，意为 Cool Other Package Repositories ）
 
-Fedora 中文社区 [Copr 编译服务](https://copr.fdzh.org) 
+Fedora 中文社区 [Copr 构建系统](https://copr.fdzh.org) 
 
 
 使用指南
