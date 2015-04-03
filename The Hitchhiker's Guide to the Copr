@@ -26,7 +26,7 @@
 <section>
    <p>按图所示，自行选择项目编译环境，可选源（非必要）</p>
     <img src="http://pic.fdzh.org/uploads/2015/04/demo2.png" style="width:900px;">
-   
+   <p>可用变量替换发行号（如 $releasever 替换 7）和架构（用 $basearch 替换 x86_64），以兼容多平台。<p>
 </section>
 
 <section>
@@ -64,8 +64,8 @@
 </section>
 <section>
   <p>使用成果吧！</p>
-   <img src="http://pic.fdzh.org/uploads/2015/04/demo11.png" style="width:900px;">
-   
+  <img src="http://pic.fdzh.org/uploads/2015/04/demo11.png" style="width:900px;">
+  <p>添加源可用 wget RepoURL -P /etc/yum.repos.d/ <br> 或 yum-config-manager --add-repo=RepoURL 命令</p>
 </section>
 
 <section>
