@@ -1,0 +1,84 @@
+<section data-background-transition='zoom' data-transition='concave' data-background='http://fdorg.qiniudn.com/galaxy-10996_1280.jpg' data-state='blackout'>
+  <h1>Copr 编译指南</h1>
+  <h2>copr.fdzh.org</h2><br>
+  <aside>Tips: 按空格 或 点击>箭头 继续</aside>
+</section>
+
+<section data-transition='concave'>
+  <p> Copr 使用 FAS 账户，如果您没有请点击 sign up 注册</p>
+  <img src="http://pic.fdzh.org/uploads/2015/04/20150403175611.png" style="width: 900px;">
+  
+</section>
+
+<section data-transition='concave'>
+  <section>
+    <p>成功登录后，我们就可以新建项目了.</br>(点击"add a new project")</p>
+    <img src="http://pic.fdzh.org/uploads/2015/04/copr2.png" style="width: 900px;">
+  </section>
+</section> 
+
+<section>
+   <p>按图所示，填入项目名称，简介及安装指南</p>
+    <img src="http://pic.fdzh.org/uploads/2015/04/demo1.png" style="width:900px;">
+</section>
+
+
+<section>
+   <p>按图所示，自行选择项目编译环境，可选源（非必要）</p>
+    <img src="http://pic.fdzh.org/uploads/2015/04/demo2.png" style="width:900px;">
+   <p>可用变量替换发行号（如 $releasever 替换 7）和架构（用 $basearch 替换 x86_64），以兼容多平台。<p>
+</section>
+
+<section>
+  <p>或添加<br>初始编译包（可留空稍后增加）并点击 Create 创建</p>
+   <img src="http://pic.fdzh.org/uploads/2015/04/demo3.png" style="width:900px;">
+</section>
+
+<section>
+  <p>跳转进入项目后我们来提交第一个编译任务吧</p>
+  <p>如图所示，粘贴进入你的 src.rpm 地址（可托管到 Github )</p>
+   <img src="http://pic.fdzh.org/uploads/2015/04/demo5.png" style="width:800px;">
+</section>
+
+<section>
+  <p>点击 Build 即可创建</p>
+  <p>如图，编译任务正在提交中</p>
+   <img src="http://pic.fdzh.org/uploads/2015/04/demo6.png" style="width:800px;">
+</section>
+
+<section>
+  <p>点击 Monitor 即可查看任务状态</p>
+  <p>如图所示，可看到编译任务的状态（目前正在编译中）</p>
+   <img src="http://pic.fdzh.org/uploads/2015/04/demo7.png" style="width:800px;">
+</section>
+
+<section>
+  <p>等待编译完成/失败</p>
+   <img src="http://pic.fdzh.org/uploads/2015/04/demo8.png" style="width:800px;">
+</section>
+
+<section>
+  <p>处理失败编译 重新提交/删除 (resubmit/delete)</p>
+   <img src="http://pic.fdzh.org/uploads/2015/04/demo9.png" style="width:900px;">
+   
+</section>
+<section>
+  <p>使用成果吧！</p>
+  <img src="http://pic.fdzh.org/uploads/2015/04/demo11.png" style="width:900px;">
+  <p>添加源可用 wget RepoURL -P /etc/yum.repos.d/ <br> 或 yum-config-manager --add-repo=RepoURL 命令</p>
+</section>
+
+<section>
+  <h3>感谢<a href='http://www.ucloud.cn/?ref=fdzh.org'>UCloud</a>赞助和 Bowen 的技术支持</h3>
+   <img src="http://fdorg.qiniudn.com/galaxy-10996_1280.jpg" style="width:900px;">
+   <br>
+   
+</section>
+
+<section>
+  <h3>还有问题?</h3>
+  试试 <a href='http://irc.fdzh.org'>IRC</a> 或 提交 <a href='https://github.com/FZUG/Copr/issues/new'>Bug</a> 
+   
+</section>
+
+
